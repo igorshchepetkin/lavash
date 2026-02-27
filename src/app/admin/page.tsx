@@ -6,6 +6,7 @@ type Tournament = {
     id: string;
     name: string;
     date: string;
+    start_time: string;
     registration_mode: "TEAM" | "SOLO";
     status: "draft" | "live" | "finished";
 };
