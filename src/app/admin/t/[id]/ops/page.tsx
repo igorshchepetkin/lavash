@@ -657,8 +657,8 @@ export default function OpsPage() {
                                                 key={g.id}
                                                 court={court}
                                                 points={pointsForCourt(court)}
-                                                teamA={{ id: g.team_a_id, name: a }}
-                                                teamB={{ id: g.team_b_id, name: b }}
+                                                teamA={{ id: g.team_a_id, name: typeof a === "string" ? a : "—" }}
+                                                teamB={{ id: g.team_b_id, name: typeof b === "string" ? b : "—" }}
                                                 done={done}
                                                 existingWinner={g.winner_team_id}
                                                 existingScore={g.score_text ?? ""}
