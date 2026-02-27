@@ -197,7 +197,7 @@ export default function TournamentShowcase() {
                   </div>
 
                   <div className={"mt-3 text-center " + teamClass(g.team_a_id)}>
-                    {a}
+                    {typeof a === "string" ? a : "—"}
                     {resolvedWinner ? moveBadge(g.team_a_id) : null}
                   </div>
 
