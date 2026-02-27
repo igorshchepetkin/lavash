@@ -87,12 +87,12 @@ export async function POST(
 
         if (error) return NextResponse.json({ ok: false, error }, { status: 400 });
 
-        const { error2 } = await supabaseAdmin
+        const { error: rejectError } = await supabaseAdmin
             .from("registrations")
             .update({ status: "rejected" })
             .eq("id", registrationId);
 
-        if (error2) return NextResponse.json({ ok: false, error2 }, { status: 400 });
+        if (rejectError) return NextResponse.json({ ok: false, error: rejectError }, { status: 400 });
 
         return NextResponse.json({ ok: true });
     }
