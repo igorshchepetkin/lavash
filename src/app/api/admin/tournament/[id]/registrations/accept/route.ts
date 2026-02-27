@@ -6,7 +6,7 @@ export async function POST(
     req: Request,
     context: { params: Promise<{ id: string }> }
 ) {
-    requireAdmin();
+    await requireAdmin();
 
     const { id } = await context.params;
     const tournamentId = id;
