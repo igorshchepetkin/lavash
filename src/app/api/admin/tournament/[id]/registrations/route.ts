@@ -1,3 +1,41 @@
+// src/app/api/admin/tournament/[id]/registrations/route.ts
+/*
+Purpose: Admin endpoint to view and manage registrations, plus create/rollback accepted entities.
+GET algorithm (dashboard snapshot):
+
+1. Require admin.
+2. Load tournament core fields (id/name/date/start_time/mode/status).
+3. Load registrations ordered by creation time, including mode-specific fields, phone, strength, and confirmation_code.
+4. Load tournament flags (`getTournamentFlags`) to drive UI controls.
+5. Load payment rows from `registration_payments` (slot-level paid status).
+6. Return `{ tournament, registrations, flags, payments }`.
+   POST algorithm (state transitions):
+7. Require admin; block if canceled or started.
+8. Parse `{ registrationId, action }` where action ∈ { "accept", "reject", "unaccept" }.
+9. Load the registration row.
+10. If `reject`:
+
+    * Reset any payment rows to unpaid (paid=false, paid_at=null).
+    * Update registration status -> `rejected`.
+11. If `unaccept` (rollback acceptance):
+
+    * Only allowed if status currently `accepted`.
+    * Find teams linked to this registration (`teams.registration_id`).
+    * Delete `team_members` then `teams` for those teamIds (TEAM flow).
+    * Delete `players` linked to this registration (`players.registration_id`) (both TEAM and SOLO flows).
+    * Set registration status back to `pending`.
+12. If `accept`:
+
+    * Update registration status -> `accepted`.
+    * If SOLO: insert a single `players` row tied to registration (`registration_id`, strength default 3).
+    * If TEAM:
+      a) Validate 3 team player names.
+      b) Insert 3 `players` rows linked to this registration.
+      c) Create a `teams` row linked to this registration, name = `"P1 / P2 / P3"`.
+      d) Insert `team_members` mapping each player to slot 1..3.
+      Outcome: This endpoint is the central orchestration point where accepting/unaccepting registrations creates or deletes the downstream entities used by team building and tournament play.
+      */
+
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
@@ -78,7 +116,7 @@ export async function POST(
     if (e1 || !reg) return NextResponse.json({ ok: false, error: e1 }, { status: 400 });
 
     if (action === "reject") {
-        // сбросить оплаты при reject
+        // СЃР±СЂРѕСЃРёС‚СЊ РѕРїР»Р°С‚С‹ РїСЂРё reject
         const { error } = await supabaseAdmin
             .from("registration_payments")
             .update({ paid: false, paid_at: null })

@@ -1,3 +1,19 @@
+// src/app/api/admin/tournament/[id]/registrations/accept/route.ts
+/*
+Purpose: Legacy/simplified “accept registration” endpoint.
+Notes: overlaps with the richer POST action handler in `/registrations/route.ts`.
+Algorithm:
+
+1. Enforce admin (`requireAdmin`).
+2. Parse `{ registrationId }` and load the registration row.
+3. Update `registrations.status` -> `accepted`.
+4. Create players according to registration mode:
+
+   * SOLO: insert 1 player (strength defaults to `reg.strength ?? 3`).
+   * TEAM: insert players for provided names (strength hardcoded to 3 here).
+     Outcome: Marks a registration accepted and materializes `players`; does not create `teams`/`team_members` for TEAM mode (unlike the newer orchestration endpoint).
+     */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdmin } from "@/lib/requireAdmin";

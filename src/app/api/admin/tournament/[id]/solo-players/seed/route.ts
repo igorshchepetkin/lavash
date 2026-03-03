@@ -1,3 +1,23 @@
+// src/app/api/admin/tournament/[id]/solo-players/seed/route.ts
+/*
+Purpose: Set or clear a SOLO player’s manual seed (fixed team placement) before the tournament starts.
+Preconditions: admin required; tournament not canceled and not started; tournament registration_mode must be SOLO.
+Algorithm:
+
+1. Parse `{ playerId, seed_team_index }`. Allow null/empty to clear seed. Clamp non-null seed_team_index to [1..8].
+2. Validate player belongs to tournament.
+3. Enforce “max 8 seeded players” rule:
+
+   * Load current seeded players (`seed_team_index is not null`).
+   * If this player is not already seeded and we’re trying to set a new seed while seedsCount>=8 -> reject.
+4. Update the player row with:
+
+   * `seed_team_index` (nullable)
+   * `seed_slot` set to 1 when seeded (placeholder validity), else null.
+5. Rely on DB unique constraint `(tournament_id, seed_team_index) WHERE seed_team_index IS NOT NULL` to prevent two players occupying same seed team index; surface conflict errors as 400.
+   Outcome: Controls deterministic “forced placement” inputs that are consumed by the SOLO team builder.
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdminOr401 } from "@/lib/adminAuth";
@@ -56,7 +76,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
   const seedsCount = (seededNow ?? []).length;
 
   if (!alreadySeeded && seed_team_index != null && seedsCount >= 8) {
-    return NextResponse.json({ ok: false, error: "Нельзя посеять более 8 игроков" }, { status: 400 });
+    return NextResponse.json({ ok: false, error: "РќРµР»СЊР·СЏ РїРѕСЃРµСЏС‚СЊ Р±РѕР»РµРµ 8 РёРіСЂРѕРєРѕРІ" }, { status: 400 });
   }
 
   // update (db has unique index (tournament_id, seed_team_index) where not null)
@@ -64,13 +84,13 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     .from("players")
     .update({
       seed_team_index,
-      seed_slot: seed_team_index != null ? 1 : null, // slot нам пока не нужен, но пусть будет валидным
+      seed_slot: seed_team_index != null ? 1 : null, // slot РЅР°Рј РїРѕРєР° РЅРµ РЅСѓР¶РµРЅ, РЅРѕ РїСѓСЃС‚СЊ Р±СѓРґРµС‚ РІР°Р»РёРґРЅС‹Рј
     })
     .eq("id", playerId)
     .eq("tournament_id", tournamentId);
 
   if (eU) {
-    // ожидаемая ошибка — конфликт уникального индекса (занята команда)
+    // РѕР¶РёРґР°РµРјР°СЏ РѕС€РёР±РєР° вЂ” РєРѕРЅС„Р»РёРєС‚ СѓРЅРёРєР°Р»СЊРЅРѕРіРѕ РёРЅРґРµРєСЃР° (Р·Р°РЅСЏС‚Р° РєРѕРјР°РЅРґР°)
     return NextResponse.json({ ok: false, error: eU }, { status: 400 });
   }
 

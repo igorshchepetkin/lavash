@@ -1,3 +1,19 @@
+// src/app/api/admin/tournaments/route.ts
+/*
+Purpose: Admin CRUD-lite for tournaments (list + create), including optional insertion of points overrides.
+GET algorithm:
+
+1. Require admin.
+2. Select tournament list fields and order by date desc.
+3. Return `{ ok:true, tournaments:[...] }`.
+   POST algorithm (create tournament):
+4. Require admin.
+5. Parse tournament fields: name/date/start_time/registration_mode and optional base points (points_c1..c4 with defaults).
+6. Insert tournament with status `"draft"` and return created id.
+7. Optional overrides: if body contains `overrides[]`, normalize numeric rows (stage_number>=1, finite points) and insert them into `tournament_points_overrides` linked to the new tournament id.
+   Outcome: Creates a tournament ready for registration/ops flows, with configurable scoring rules per court and per stage.
+   */
+
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";

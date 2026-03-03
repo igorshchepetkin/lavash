@@ -1,3 +1,21 @@
+// src/app/api/admin/tournament/[id]/withdraw/route.ts
+/*
+Purpose: Withdraw (cancel) a registration before tournament start using a cancel code, with rollback if already accepted.
+Notes: This endpoint does NOT enforce admin auth despite being under `/admin/...`; it behaves like a “self-service cancel with code”.
+Preconditions: tournament not canceled and not started.
+Algorithm:
+
+1. Parse `{ cancel_code }` and validate it exists.
+2. Find the registration by `(tournament_id, cancel_code)`. If not found -> 404.
+3. If already withdrawn -> `{ ok:true }`.
+4. If registration status is `accepted`, perform rollbackAccepted(registrationId):
+
+   * Find teams linked to registration (`teams.registration_id`) and delete `team_members` then `teams`.
+   * Delete players linked to registration (`players.registration_id`).
+5. Update `registrations.status` -> `"withdrawn"`.
+   Outcome: Ensures late cancellation cleans up any derived entities created during acceptance, keeping DB consistent.
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getTournamentFlags } from "@/lib/tournamentGuards";
@@ -52,7 +70,7 @@ export async function POST(
 
     if (reg.status === "withdrawn") return NextResponse.json({ ok: true });
 
-    // If accepted — rollback created entities
+    // If accepted вЂ” rollback created entities
     if (reg.status === "accepted") {
         await rollbackAccepted(reg.id);
     }

@@ -1,3 +1,22 @@
+// src/app/api/admin/tournament/[id]/points-overrides/route.ts
+/*
+Purpose: Manage per-stage point overrides (by court) before tournament start.
+GET algorithm:
+
+1. Require admin.
+2. Fetch overrides for tournament ordered by `stage_number`.
+3. Return `{ ok:true, overrides:[{stage_number, points_c1..points_c4}] }`.
+   POST algorithm (replace-all synchronization):
+4. Require admin; block if tournament canceled or started.
+5. Parse `overrides` array from body and normalize numbers:
+
+   * Keep only rows with finite stage_number>=1 and finite points_c1..c4.
+   * Attach `tournament_id`.
+6. Delete all existing overrides for the tournament (simple “reset then insert” policy).
+7. Insert normalized overrides if any remain.
+   Outcome: Provides a deterministic “single source of truth” override set, used by scoring endpoint to compute awarded points.
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdminOr401 } from "@/lib/adminAuth";
@@ -34,7 +53,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
   const body = await req.json().catch(() => ({}));
   const overridesRaw = Array.isArray(body?.overrides) ? body.overrides : [];
 
-  // Нормализуем
+  // РќРѕСЂРјР°Р»РёР·СѓРµРј
   const overrides = overridesRaw
     .map((o: any) => ({
       tournament_id: tournamentId,
@@ -50,8 +69,8 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
       [o.points_c1, o.points_c2, o.points_c3, o.points_c4].every((x: any) => Number.isFinite(x))
     );
 
-  // Политика: перед записью очищаем текущие overrides и пишем новые (простая синхронизация списка)
-  // Так проще, чем diff/upsert/delete.
+  // РџРѕР»РёС‚РёРєР°: РїРµСЂРµРґ Р·Р°РїРёСЃСЊСЋ РѕС‡РёС‰Р°РµРј С‚РµРєСѓС‰РёРµ overrides Рё РїРёС€РµРј РЅРѕРІС‹Рµ (РїСЂРѕСЃС‚Р°СЏ СЃРёРЅС…СЂРѕРЅРёР·Р°С†РёСЏ СЃРїРёСЃРєР°)
+  // РўР°Рє РїСЂРѕС‰Рµ, С‡РµРј diff/upsert/delete.
   const { error: eDel } = await supabaseAdmin
     .from("tournament_points_overrides")
     .delete()

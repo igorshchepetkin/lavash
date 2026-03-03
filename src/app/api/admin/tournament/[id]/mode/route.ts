@@ -1,3 +1,14 @@
+// src/app/api/admin/tournament/[id]/mode/route.ts
+/*
+Purpose: Read-only admin helper to fetch a tournament registration mode.
+Algorithm:
+
+1. Read tournamentId from params.
+2. Query `tournaments.registration_mode`.
+3. Return `{ ok:true, registration_mode }` or 404 if not found.
+   Outcome: Lightweight endpoint for admin UI to branch logic between SOLO and TEAM flows.
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 

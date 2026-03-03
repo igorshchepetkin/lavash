@@ -1,3 +1,15 @@
+// src/app/api/admin/tournament/[id]/registrations/strength/route.ts
+/*
+Purpose: Admin sets/adjusts a registration’s declared strength before tournament start (both TEAM and SOLO).
+Preconditions: admin required; tournament not canceled and not started.
+Algorithm:
+
+1. Parse `{ registrationId, strength }` and clamp strength to [1..5].
+2. Verify the registration exists for this tournament.
+3. Update `registrations.strength` with the normalized value.
+   Outcome: Adjusts the strength reference used later when creating players/teams (and for strength-based initial seeding in first match).
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdminOr401 } from "@/lib/adminAuth";
@@ -30,7 +42,7 @@ export async function POST(
 
   if (!reg) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
 
-  // теперь разрешаем и TEAM, и SOLO
+  // С‚РµРїРµСЂСЊ СЂР°Р·СЂРµС€Р°РµРј Рё TEAM, Рё SOLO
   const { error } = await supabaseAdmin
     .from("registrations")
     .update({ strength: s })

@@ -1,3 +1,18 @@
+// src/app/api/admin/tournament/[id]/players/strength/route.ts
+/*
+Purpose: Update a SOLO player’s strength (rating) before the tournament starts.
+Preconditions:
+
+* Admin required.
+* Tournament must not be canceled and must not be started (`getTournamentFlags`).
+  Algorithm:
+
+1. Parse `{ playerId, strength }`, clamp strength to [1..5].
+2. Verify the player exists and belongs to this tournament (`players` by id + tournament_id).
+3. Update `players.strength` for that player.
+   Outcome: Adjusts player rating used by deterministic bucket assignment and team balancing algorithms prior to team building / start.
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdminOr401 } from "@/lib/adminAuth";

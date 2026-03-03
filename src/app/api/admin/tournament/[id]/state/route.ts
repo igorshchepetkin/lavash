@@ -1,3 +1,17 @@
+// src/app/api/admin/tournament/[id]/state/route.ts
+/*
+Purpose: Admin “current state snapshot” for ops/dashboard.
+Algorithm:
+
+1. Require admin.
+2. Load full tournament row (`tournaments.*`).
+3. Load teams (id, name, points) ordered by points desc (leaderboard).
+4. Load stages ordered by number desc and pick latestStage.
+5. If latestStage exists, load its games ordered by court, including winner, score_text, points_awarded, is_final.
+6. Return `{ tournament, teams, latestStage, games }`.
+   Outcome: A compact read model for the admin UI showing the current match stage and standings.
+   */
+
 import { NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";

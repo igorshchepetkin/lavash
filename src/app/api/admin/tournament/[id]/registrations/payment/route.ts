@@ -1,3 +1,21 @@
+// src/app/api/admin/tournament/[id]/registrations/payment/route.ts
+/*
+Purpose: Admin toggles payment status per registration slot (supports TEAM slot 1..3; SOLO slot 1 only).
+Preconditions: admin required; tournament not canceled and not started.
+Algorithm:
+
+1. Parse `{ registrationId, slot, paid }` and validate slot in [1..3].
+2. Ensure registration exists for this tournament.
+3. Enforce policy: payment can be recorded only if registration status is `accepted`.
+4. Enforce SOLO constraint: only slot=1 allowed.
+5. Upsert into `registration_payments` on conflict `(registration_id, slot)` with fields:
+
+   * paid boolean
+   * paid_at timestamp if paid=true, else null
+   * tournament_id, registration_id, slot
+     Outcome: Stores payment confirmation in a normalized slot-based table, used by “start/build” guards (paid acceptance checks).
+     */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdminOr401 } from "@/lib/adminAuth";
@@ -30,7 +48,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
 
   if (!reg) return NextResponse.json({ ok: false, error: "Not found" }, { status: 404 });
 
-  // как ты хотел: подтверждать оплату можно только для accepted
+  // РєР°Рє С‚С‹ С…РѕС‚РµР»: РїРѕРґС‚РІРµСЂР¶РґР°С‚СЊ РѕРїР»Р°С‚Сѓ РјРѕР¶РЅРѕ С‚РѕР»СЊРєРѕ РґР»СЏ accepted
   if (reg.status !== "accepted") {
     return NextResponse.json({ ok: false, error: "Payment allowed only for accepted registrations" }, { status: 400 });
   }

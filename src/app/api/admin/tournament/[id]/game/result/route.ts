@@ -1,3 +1,33 @@
+// src/app/api/admin/tournament/[id]/game/result/route.ts
+/*
+Purpose: Submit a game result, award points, and update “court movement” state for the two teams.
+Preconditions:
+
+* Admin required.
+* Tournament not canceled and not finished.
+* Game must exist, belong to tournament flow, and not already scored.
+  Algorithm:
+
+1. Parse `{ gameId, winnerTeamId, scoreText }`. Validate required fields.
+2. Load tournament base points configuration (`points_c1..points_c4`) and game record (teams, court, stage_id, winner).
+3. Validate `winnerTeamId` is either `team_a_id` or `team_b_id`.
+4. Determine stage number (read from `stages` by `stage_id`).
+5. Resolve points for this court:
+
+   * Start with tournament base points by court (1..4).
+   * If stageNumber is known, check `tournament_points_overrides` for that (tournamentId, stageNumber).
+   * If override exists, replace points_c1..c4 from override.
+   * Choose the points value for `g.court`.
+6. Persist game result: set `winner_team_id`, optional `score_text`, and `points_awarded` (no auto “next stage” here).
+7. Increment winner team’s `teams.points` by awarded points.
+8. Update `team_state` movement:
+
+   * Winner moves “up” one court (court-1, clamped to [1..4]).
+   * Loser moves “down” one court (court+1, clamped to [1..4]).
+9. Compute `stageComplete` by checking if every game in this stage has a winner; return it to help UI decide whether “Start next match” can be enabled.
+   Outcome: Atomic-ish update across games, teams, and team_state that drives both scoring and court progression mechanics.
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdminOr401 } from "@/lib/adminAuth";

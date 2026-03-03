@@ -1,3 +1,22 @@
+// src/app/api/admin/tournament/[id]/solo-players/route.ts
+/*
+Purpose: Provide admin UI with a deterministic ranked list of SOLO players, enriched with bucket and team placement info.
+Algorithm:
+
+1. Require admin.
+2. Load all players for tournament with strength + seed fields. If none -> return empty.
+3. Deterministic ordering: normalize strength [1..5], sort by strength desc, then FNV-1a hash `(id + tournamentId)` asc, then id asc.
+4. Derive rank (1..N) and bucket assignment by index:
+
+   * 1..8 -> bucket 1, 9..16 -> bucket 2, rest -> bucket 3.
+5. If teams already exist:
+
+   * Load teams ordered by created_at; map team_id -> team_index (1..8).
+   * Load team_members for those teams; map player_id -> team_index and team_slot.
+6. Return players array with: id, full_name, strength, seed fields, rank, bucket, and optional team_index/team_slot (if teams built).
+   Outcome: A stable, reproducible view that matches the team-building bucket logic and helps admins seed specific players into teams.
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdminOr401 } from "@/lib/adminAuth";

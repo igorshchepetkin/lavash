@@ -1,3 +1,19 @@
+// src/app/api/admin/tournament/[id]/apply/route.ts
+/*
+Purpose: Create a new registration for a tournament (mode-aware), returning a cancel code.
+Key behavior: does NOT enforce admin auth; it is located under `/admin/...` but behaves like a “manual add / kiosk” apply endpoint.
+Algorithm:
+
+1. Read `tournamentId` from route params and fetch tournament flags via `getTournamentFlags()`.
+2. Block if tournament is canceled or already started.
+3. Load tournament `registration_mode` from DB to decide SOLO vs TEAM registration payload schema.
+4. Generate a random `cancel_code` (10 chars, excluding ambiguous symbols).
+5. If SOLO: validate `solo_player` name and numeric `strength` (clamp 1..5, default 3) -> insert `registrations` row with `mode:"SOLO"`, `status:"pending"`, `cancel_code`.
+6. If TEAM: validate 3 player names -> insert `registrations` row with `mode:"TEAM"`, `status:"pending"`, `cancel_code`.
+7. Return `{ ok:true, registration_id, cancel_code }`.
+   Outcome: creates a pending registration; acceptance and entity creation (players/teams) happens elsewhere.
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getTournamentFlags } from "@/lib/tournamentGuards";

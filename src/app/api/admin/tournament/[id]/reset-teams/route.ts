@@ -1,3 +1,15 @@
+// src/app/api/admin/tournament/[id]/reset-teams/route.ts
+/*
+Purpose: Delete all built teams for a SOLO tournament while still in draft, allowing rebuild.
+Preconditions: admin required; tournament not canceled; tournament status must be `draft`; tournament mode must be `SOLO`.
+Algorithm:
+
+1. Fetch all team ids for the tournament.
+2. Delete `team_members` where team_id IN (teamIds) first (FK-safe order).
+3. Delete all `teams` for the tournament.
+   Outcome: Returns tournament to “pre-team-build” state so `/build-teams` can run again.
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdminOr401 } from "@/lib/adminAuth";

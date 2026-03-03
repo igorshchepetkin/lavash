@@ -1,3 +1,18 @@
+// src/app/api/admin/tournament/[id]/registrations/create/route.ts
+/*
+Purpose: Admin-side creation of a pending registration with a confirmation code (mode-aware).
+Preconditions: admin required; tournament not canceled and not started.
+Algorithm:
+
+1. Load tournament registration_mode.
+2. Generate a random `confirmation_code` (10 chars).
+3. If SOLO: validate last/first name and E.164-like phone (must start with '+'); build `solo_player = "Last First"`.
+4. Insert into `registrations` with `status:"pending"`, `strength:3` default, store `solo_*` fields and phone.
+5. If TEAM: validate 3 names + phone; insert `registrations` row with team_player1..3, `status:"pending"`, and confirmation_code.
+6. Return `{ ok:true, registration_id, confirmation_code }`.
+   Outcome: Creates a “manual/admin-entered” registration that can later be accepted and paid, using the same pipeline as public registrations.
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdminOr401 } from "@/lib/adminAuth";

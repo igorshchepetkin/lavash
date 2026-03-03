@@ -1,3 +1,41 @@
+// src/app/api/admin/tournament/[id]/build-teams/route.ts
+/*
+Purpose: Build 8 balanced teams (A..H) from 24 SOLO players, with optional manual seeding, before tournament start.
+Preconditions:
+
+* Admin required (`requireAdminOr401`).
+* Tournament must be `draft` and not canceled (`getTournamentFlags`).
+* All accepted registrations must be paid (`assertAllAcceptedPaid`).
+* Tournament `registration_mode` must be `SOLO`.
+* Teams must not exist yet (prevents rebuilding without reset).
+  Core algorithm:
+
+1. Fetch 24 players for the tournament (`players` table), including `strength` and optional seed fields `seed_team_index` (1..8) and `seed_slot` (1..3). Reject if player count != 24.
+2. Deterministic ranking for bucket assignment:
+
+   * Normalize strength into [1..5].
+   * Sort by strength desc, then by deterministic FNV-1a hash of `(playerId + tournamentId)` asc, then by `id` as final tie-break.
+     This makes the “top/mid/bottom” segmentation stable across endpoints.
+3. Split sorted list into 3 buckets of 8 players each (bucket1 strongest, bucket2 middle, bucket3 weakest).
+4. Create 8 empty `teams` rows for the tournament.
+5. Apply seeds (manual placements):
+
+   * Take all players with `seed_team_index != null`.
+   * Enforce max 8 seeded players and forbid duplicate `seed_team_index` in the request set.
+   * For each seeded player, assign them into the requested team index (1..8) and into a free slot (preferred `seed_slot` if available, otherwise first free).
+   * Track used players, occupied slots, and “bucket already used by team” to preserve bucket diversity.
+6. Fill remaining slots per team using bucket pools:
+
+   * Build pool1/pool2/pool3 from remaining players per bucket (excluding seeded).
+   * Shuffle within each bucket (bucket membership is deterministic; only intra-bucket order is randomized).
+   * First pass per team: try to take one player from each bucket not yet used by that team.
+   * Second pass: if still not full (because a bucket ran out), fill from any pool, preferring unused buckets first, then any.
+7. Validate output: must assign exactly 24 members (8 teams * 3 slots). Extra safety check: ensure no team has duplicate buckets (should be impossible when buckets are healthy).
+8. Insert `team_members` rows.
+9. Generate team display names by joining member names in slot order (`"P1 / P2 / P3"`) and update `teams.name`.
+   Outcome: Creates balanced SOLO teams with stable bucket logic + optional manual seeding, ready for tournament start.
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdminOr401 } from "@/lib/adminAuth";
@@ -96,7 +134,7 @@ export async function POST(
     try {
         await assertAllAcceptedPaid(tournamentId);
     } catch {
-        return NextResponse.json({ ok: false, error: "Есть подтверждённые заявки без взноса" }, { status: 400 });
+        return NextResponse.json({ ok: false, error: "Р•СЃС‚СЊ РїРѕРґС‚РІРµСЂР¶РґС‘РЅРЅС‹Рµ Р·Р°СЏРІРєРё Р±РµР· РІР·РЅРѕСЃР°" }, { status: 400 });
     }
 
     const { data: t } = await supabaseAdmin
@@ -117,7 +155,7 @@ export async function POST(
         .limit(1);
 
     if ((existingTeams?.length ?? 0) > 0) {
-        return NextResponse.json({ ok: false, error: "Команды уже созданы. Сначала удалите команды/составы." }, { status: 400 });
+        return NextResponse.json({ ok: false, error: "РљРѕРјР°РЅРґС‹ СѓР¶Рµ СЃРѕР·РґР°РЅС‹. РЎРЅР°С‡Р°Р»Р° СѓРґР°Р»РёС‚Рµ РєРѕРјР°РЅРґС‹/СЃРѕСЃС‚Р°РІС‹." }, { status: 400 });
     }
 
     const { data: playersRaw } = await supabaseAdmin
@@ -129,7 +167,7 @@ export async function POST(
 
     if (players.length !== 24) {
         return NextResponse.json(
-            { ok: false, error: `Нужно 24 игрока, сейчас ${players.length}` },
+            { ok: false, error: `РќСѓР¶РЅРѕ 24 РёРіСЂРѕРєР°, СЃРµР№С‡Р°СЃ ${players.length}` },
             { status: 400 }
         );
     }
@@ -192,14 +230,14 @@ export async function POST(
         }));
 
     if (seeds.length > 8) {
-        return NextResponse.json({ ok: false, error: "Можно посеять максимум 8 игроков" }, { status: 400 });
+        return NextResponse.json({ ok: false, error: "РњРѕР¶РЅРѕ РїРѕСЃРµСЏС‚СЊ РјР°РєСЃРёРјСѓРј 8 РёРіСЂРѕРєРѕРІ" }, { status: 400 });
     }
 
     // Ensure no duplicate team_index in seeds (DB should enforce anyway)
     const dupTeam = new Set<number>();
     for (const s of seeds) {
         if (dupTeam.has(s.team_index)) {
-            return NextResponse.json({ ok: false, error: "Нельзя посеять двух игроков в одну команду" }, { status: 400 });
+            return NextResponse.json({ ok: false, error: "РќРµР»СЊР·СЏ РїРѕСЃРµСЏС‚СЊ РґРІСѓС… РёРіСЂРѕРєРѕРІ РІ РѕРґРЅСѓ РєРѕРјР°РЅРґСѓ" }, { status: 400 });
         }
         dupTeam.add(s.team_index);
     }
@@ -208,7 +246,7 @@ export async function POST(
         const teamId = teamIdByIndex.get(s.team_index)!;
         const slot = firstFreeSlot(teamId, s.seed_slot);
         if (!slot) {
-            return NextResponse.json({ ok: false, error: `В команде ${s.team_index} нет свободного слота` }, { status: 400 });
+            return NextResponse.json({ ok: false, error: `Р’ РєРѕРјР°РЅРґРµ ${s.team_index} РЅРµС‚ СЃРІРѕР±РѕРґРЅРѕРіРѕ СЃР»РѕС‚Р°` }, { status: 400 });
         }
 
         memberRows.push({ team_id: teamId, player_id: s.player_id, slot });
@@ -268,7 +306,7 @@ export async function POST(
             const slot = firstFreeSlot(teamId, null);
             if (!slot) break;
 
-            // Prefer buckets not used yet for this team, but if impossible — allow any
+            // Prefer buckets not used yet for this team, but if impossible вЂ” allow any
             const candidateBuckets = [1, 2, 3].filter((b) => !isTeamBucketUsed(teamId, b));
             const tryOrder = candidateBuckets.length ? candidateBuckets : [1, 2, 3];
 
@@ -293,7 +331,7 @@ export async function POST(
 
     // Validate we assigned exactly 24 players into 8*3 slots
     if (memberRows.length !== 24) {
-        return NextResponse.json({ ok: false, error: `Не удалось распределить всех игроков. Назначено: ${memberRows.length}/24` }, { status: 400 });
+        return NextResponse.json({ ok: false, error: `РќРµ СѓРґР°Р»РѕСЃСЊ СЂР°СЃРїСЂРµРґРµР»РёС‚СЊ РІСЃРµС… РёРіСЂРѕРєРѕРІ. РќР°Р·РЅР°С‡РµРЅРѕ: ${memberRows.length}/24` }, { status: 400 });
     }
 
     // Extra safety: ensure no duplicate buckets in the same team (when buckets are well-formed)
@@ -314,7 +352,7 @@ export async function POST(
         return NextResponse.json(
             {
                 ok: false,
-                error: "Обнаружены дубли корзин внутри команды (ошибка распределения/посева).",
+                error: "РћР±РЅР°СЂСѓР¶РµРЅС‹ РґСѓР±Р»Рё РєРѕСЂР·РёРЅ РІРЅСѓС‚СЂРё РєРѕРјР°РЅРґС‹ (РѕС€РёР±РєР° СЂР°СЃРїСЂРµРґРµР»РµРЅРёСЏ/РїРѕСЃРµРІР°).",
                 details: dupTeams,
             },
             { status: 400 }

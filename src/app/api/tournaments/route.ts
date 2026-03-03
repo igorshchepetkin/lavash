@@ -1,3 +1,10 @@
+// src/app/api/tournaments/route.ts
+/*
+Purpose: Public tournaments list endpoint.
+Algorithm: Select tournaments list fields from DB ordered by date desc; return `{ ok:true, tournaments:[...] }` or 400 on DB error.
+Outcome: Minimal data source for public “choose tournament / upcoming events” view.
+*/
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 

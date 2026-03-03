@@ -1,3 +1,20 @@
+// src/app/api/tournament/[id]/public/route.ts
+/*
+Purpose: Public “tournament showcase” endpoint: standings + latest match + UI hint for transitions.
+Algorithm:
+
+1. Load tournament public fields (including points configuration and status).
+2. Load teams ordered by points desc (leaderboard).
+3. Load stages ordered by number desc and pick latestStage.
+4. If latestStage exists, load its games ordered by court (winner, score_text, points_awarded, is_final).
+5. Compute `nextStageExists` as a UI signal:
+
+   * If latestStage number is N, check whether stage N+1 already exists in DB.
+   * This is used to hide/show arrows/transitions on the public board until the next match is actually created.
+6. Return `{ tournament, teams, latestStage, games, nextStageExists }`.
+   Outcome: Read model for the public screen that supports both “current match” display and controlled progression visuals.
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
@@ -38,7 +55,7 @@ export async function GET(
             .order("court", { ascending: true })
         : { data: [] as any[] };
 
-    // важно для витрины: показать стрелки/переходы только пока следующий матч НЕ стартовал
+    // РІР°Р¶РЅРѕ РґР»СЏ РІРёС‚СЂРёРЅС‹: РїРѕРєР°Р·Р°С‚СЊ СЃС‚СЂРµР»РєРё/РїРµСЂРµС…РѕРґС‹ С‚РѕР»СЊРєРѕ РїРѕРєР° СЃР»РµРґСѓСЋС‰РёР№ РјР°С‚С‡ РќР• СЃС‚Р°СЂС‚РѕРІР°Р»
     const latestNum = latestStage?.number ?? 0;
 
     const { data: nextStageRow } = latestNum

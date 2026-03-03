@@ -1,3 +1,45 @@
+// src/app/api/admin/tournament/[id]/start/route.ts
+/*
+Purpose: Start a tournament “match stage” (create the next stage and its 4 games) and update team_state courts.
+Preconditions:
+
+* Admin required.
+* Tournament not canceled and not finished.
+* All accepted registrations must be paid (assertAllAcceptedPaid).
+* If a previous stage exists, it must be fully completed (every game has winner_team_id) before starting next.
+  Core mechanics: “4 courts ladder” where winners move up and losers move down between stages.
+  Algorithm:
+
+1. Read tournamentId and validate flags; block if canceled/finished.
+2. Load last stage (highest number). If exists:
+
+   * Load its games; ensure all have winner_team_id. If not complete -> reject (“Previous match is not complete”).
+3. Compute `nextNumber = lastStage.number + 1` (or 1 if no stage yet).
+4. Load exactly 8 teams for the tournament; reject otherwise.
+5. Build games for the next stage:
+   A) If this is NOT the first stage:
+
+   * Load `team_state` rows for tournament (team_id, current_court).
+   * Group teams by court 1..4; require exactly 2 teams per court.
+   * Create 4 games: for each court, pair the 2 teams currently on that court.
+     B) If this IS the first stage:
+   * Compute team “strength” map:
+
+     * TEAM mode: strength comes from linked registration strength (`teams.registration_id -> registrations.strength`).
+     * SOLO mode: sum of players.strength across team_members per team.
+   * Order teams by strength desc, but shuffle within equal-strength groups to avoid deterministic bias.
+   * Pair teams sequentially, placing strongest pair on court 4, next on 3, next on 2, weakest on 1 (initial ladder seeding).
+6. Insert a new `stages` row with `number=nextNumber`.
+7. Insert 4 `games` rows for that stage (court + team_a_id/team_b_id).
+8. Update `team_state` for current courts:
+
+   * If first stage: insert state rows for all 8 teams.
+   * Else: update each team’s `current_court` to the newly scheduled court.
+9. Update tournament status to `"live"`.
+10. Return `{ ok:true, stageNumber: nextNumber }`.
+    Outcome: Creates the next playable match stage and drives the ladder progression using `team_state` across successive stages.
+    */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdminOr401 } from "@/lib/adminAuth";
@@ -90,7 +132,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     try {
         await assertAllAcceptedPaid(tournamentId);
     } catch {
-        return NextResponse.json({ ok: false, error: "Есть подтверждённые заявки без взноса" }, { status: 400 });
+        return NextResponse.json({ ok: false, error: "Р•СЃС‚СЊ РїРѕРґС‚РІРµСЂР¶РґС‘РЅРЅС‹Рµ Р·Р°СЏРІРєРё Р±РµР· РІР·РЅРѕСЃР°" }, { status: 400 });
     }
 
     const body = await req.json().catch(() => ({}));
@@ -132,7 +174,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     if (eTeams) return NextResponse.json({ ok: false, error: eTeams }, { status: 400 });
 
     if (!teams || teams.length !== 8) {
-        return NextResponse.json({ ok: false, error: `Нужно 8 команд, сейчас ${teams?.length ?? 0}` }, { status: 400 });
+        return NextResponse.json({ ok: false, error: `РќСѓР¶РЅРѕ 8 РєРѕРјР°РЅРґ, СЃРµР№С‡Р°СЃ ${teams?.length ?? 0}` }, { status: 400 });
     }
 
     // 3) Build games for this stage
@@ -159,7 +201,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
             const ts = byCourt.get(court) ?? [];
             if (ts.length !== 2) {
                 return NextResponse.json(
-                    { ok: false, error: `На корте ${court} должно быть 2 команды, сейчас ${ts.length}` },
+                    { ok: false, error: `РќР° РєРѕСЂС‚Рµ ${court} РґРѕР»Р¶РЅРѕ Р±С‹С‚СЊ 2 РєРѕРјР°РЅРґС‹, СЃРµР№С‡Р°СЃ ${ts.length}` },
                     { status: 400 }
                 );
             }
@@ -174,7 +216,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
         const ordered = orderTeamsByStrength(teamIds, strengthById);
 
         if (ordered.length !== 8) {
-            return NextResponse.json({ ok: false, error: "Нужно 8 команд для старта" }, { status: 400 });
+            return NextResponse.json({ ok: false, error: "РќСѓР¶РЅРѕ 8 РєРѕРјР°РЅРґ РґР»СЏ СЃС‚Р°СЂС‚Р°" }, { status: 400 });
         }
 
         // pairs: strongest on court 4, next on 3, next on 2, weakest on 1

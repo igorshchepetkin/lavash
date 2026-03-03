@@ -1,3 +1,18 @@
+// src/app/api/tournament/[id]/apply/route.ts
+/*
+Purpose: Public registration endpoint (mode-aware) returning a confirmation code used later for self-withdrawal.
+Preconditions: tournament not canceled and not started.
+Algorithm:
+
+1. Load tournament flags; block if canceled/started.
+2. Load tournament `registration_mode` from DB.
+3. Generate a random `confirmation_code` (10 chars).
+4. SOLO: validate last/first name + phone starts with '+'. Build `solo_player = "Last First"`. Insert pending registration with phone and default strength=3.
+5. TEAM: validate 3 names + phone starts with '+'. Insert pending registration with team_player1..3 and phone.
+6. Return `{ ok:true, registration_id, confirmation_code }`.
+   Outcome: Creates a pending registration request that must later be accepted by admin; confirmation_code enables participant self-withdrawal.
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getTournamentFlags } from "@/lib/tournamentGuards";
@@ -50,9 +65,9 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
         mode: "SOLO",
         solo_last_name: last,
         solo_first_name: first,
-        solo_player: full, // удобное ФИО для списка
+        solo_player: full, // СѓРґРѕР±РЅРѕРµ Р¤РРћ РґР»СЏ СЃРїРёСЃРєР°
         phone,
-        strength: 3, // судья поменяет до посева
+        strength: 3, // СЃСѓРґСЊСЏ РїРѕРјРµРЅСЏРµС‚ РґРѕ РїРѕСЃРµРІР°
         status: "pending",
         confirmation_code,
       })
@@ -80,7 +95,7 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
       team_player1: p1,
       team_player2: p2,
       team_player3: p3,
-      phone, // телефон заявителя команды
+      phone, // С‚РµР»РµС„РѕРЅ Р·Р°СЏРІРёС‚РµР»СЏ РєРѕРјР°РЅРґС‹
       status: "pending",
       confirmation_code,
     })

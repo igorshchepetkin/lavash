@@ -1,3 +1,20 @@
+// src/app/api/tournament/[id]/withdraw/route.ts
+/*
+Purpose: Participant self-withdrawal by confirmation code before tournament start, with rollback if accepted.
+Preconditions: tournament not canceled and not started.
+Algorithm:
+
+1. Parse `{ confirmation_code }`; validate present.
+2. Find registration by `(tournament_id, confirmation_code)`. If not found -> 404.
+3. If already withdrawn -> `{ ok:true }`.
+4. If status is `accepted`, rollbackAccepted(registrationId):
+
+   * Delete team_members and teams linked to registration (TEAM flow).
+   * Delete players linked to registration (both TEAM and SOLO).
+5. Update `registrations.status` -> `"withdrawn"`.
+   Outcome: Ensures self-service withdrawals remain consistent even if admin already accepted the registration (removes derived entities).
+   */
+
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { getTournamentFlags } from "@/lib/tournamentGuards";
@@ -50,7 +67,7 @@ export async function POST(
 
     if (reg.status === "withdrawn") return NextResponse.json({ ok: true });
 
-    // If accepted — rollback created entities
+    // If accepted вЂ” rollback created entities
     if (reg.status === "accepted") {
         await rollbackAccepted(reg.id);
     }
