@@ -67,6 +67,13 @@ export default function TournamentShowcase() {
     [teams]
   );
 
+  function teamName(teamId: any): string {
+    const v = nameById.get(teamId);
+    if (typeof v === "string" && v.trim()) return v;
+    if (v == null) return "—";
+    return String(v);
+  }
+
   const regsRaw = p?.registrations ?? [];
 
   // Sort for public showcase:
@@ -312,7 +319,10 @@ export default function TournamentShowcase() {
               const badgeB = moveBadgePublic(g.court, winnerId, g.team_b_id);
 
               return (
-                <div key={g.id} className="h-full rounded-2xl border border-slate-100 p-4 sm:min-h-[210px]">
+                <div
+                  key={g.id}
+                  className="h-full rounded-2xl border border-slate-100 p-4 sm:min-h-[210px]"
+                >
                   <div className="flex items-center justify-between">
                     <div className="text-sm font-bold text-slate-700">Корт {g.court}</div>
                     <div className="text-sm font-semibold text-slate-600">
@@ -329,7 +339,7 @@ export default function TournamentShowcase() {
                     >
                       <div className="min-h-[2.75rem] flex-1 pr-2">
                         <div className="line-clamp-2 break-words text-sm font-semibold leading-tight text-slate-900">
-                          {nameById.get(g.team_a_id) ?? "—"}
+                          {teamName(g.team_a_id)}
                         </div>
                       </div>
 
@@ -344,7 +354,7 @@ export default function TournamentShowcase() {
                     >
                       <div className="min-h-[2.75rem] flex-1 pr-2">
                         <div className="line-clamp-2 break-words text-sm font-semibold leading-tight text-slate-900">
-                          {nameById.get(g.team_b_id) ?? "—"}
+                          {teamName(g.team_b_id)}
                         </div>
                       </div>
 
