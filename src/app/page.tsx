@@ -12,10 +12,10 @@ type T = {
 };
 
 function statusLabel(s: T["status"]) {
-  if (s === "draft") return { text: "приём заявок", badge: "bg-orange-100 text-orange-700" };
-  if (s === "live") return { text: "идёт", badge: "bg-slate-100 text-slate-700" };
-  if (s === "finished") return { text: "завершён", badge: "bg-slate-100 text-slate-700" };
-  return { text: "отменён", badge: "bg-red-100 text-red-700" };
+  if (s === "draft") return { text: "Приём заявок", badge: "bg-orange-100 text-orange-700" };
+  if (s === "live") return { text: "Идёт", badge: "bg-slate-100 text-slate-700" };
+  if (s === "finished") return { text: "Завершён", badge: "bg-slate-100 text-slate-700" };
+  return { text: "Отменён", badge: "bg-red-100 text-red-700" };
 }
 
 export default function Home() {

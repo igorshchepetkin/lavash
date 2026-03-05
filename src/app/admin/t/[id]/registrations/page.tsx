@@ -5,6 +5,16 @@ import { useParams } from "next/navigation";
 
 type Registration = any;
 
+function statusLabel(s: string) {
+    if (s === "pending") return "На рассмотрении";
+    if (s === "accepted") return "Принята";
+    if (s === "reserve") return "Резерв";
+    if (s === "reserve_pending") return "Резерв ➔ Основа";
+    if (s === "rejected") return "Отклонена";
+    if (s === "withdrawn") return "Снята";
+    if (s === "canceled") return "Отменена";
+    return s;
+}
 export default function RegistrationsPage() {
     const params = useParams<{ id: string }>();
     const tournamentId = params.id;
@@ -26,7 +36,7 @@ export default function RegistrationsPage() {
         setPayments(json.payments ?? []);
     }
 
-    async function act(registrationId: string, action: "accept" | "reject" | "unaccept") {
+    async function act(registrationId: string, action: "accept" | "reject" | "unaccept" | "confirm_reserve") {
         setBusyId(registrationId);
         try {
             await fetch(`/api/admin/tournament/${tournamentId}/registrations`, {
@@ -47,6 +57,7 @@ export default function RegistrationsPage() {
 
     const pendingCount = regs.filter((r) => r.status === "pending").length;
     const acceptedCount = regs.filter((r) => r.status === "accepted").length;
+    const reserveCount = regs.filter((r) => r.status === "reserve" || r.status === "reserve_pending").length;
 
     const limit =
         tournament?.registration_mode === "SOLO" ? 24 :
@@ -191,7 +202,7 @@ export default function RegistrationsPage() {
                             <div className="font-bold">{tournament.name}</div>
                             <div className="text-sm text-slate-600">
                                 {tournament.date}{tournament.start_time ? ` · ${tournament.start_time}` : ""} ·{" "}
-                                <b className="text-orange-600">{tournament.registration_mode}</b> · статус:{" "}
+                                <b className="text-orange-600">{tournament.registration_mode}</b> · Статус:{" "}
                                 <b className={tournament.status === "canceled" ? "text-red-700" : "text-orange-600"}>{tournament.status}</b>
                             </div>
                         </div>
@@ -203,7 +214,7 @@ export default function RegistrationsPage() {
                         </div>
                         {limit && (
                             <div className="rounded-full bg-orange-100 px-3 py-1 text-xs font-bold text-orange-700">
-                                Принято: {acceptedCount} из {limit}
+                                В основе: {acceptedCount} из {limit}{reserveCount ? ` · Резерв: ${reserveCount}` : ""}
                             </div>
                         )}
                         <div className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-700">
@@ -378,7 +389,7 @@ export default function RegistrationsPage() {
                                     key={r.id}
                                     className={
                                         "rounded-2xl border p-4 " +
-                                        (r.status === "accepted" && fullyPaid(r)
+                                        ((r.status === "accepted") && fullyPaid(r)
                                             ? "border-orange-200 bg-orange-50/30"
                                             : "border-slate-100")
                                     }
@@ -395,7 +406,7 @@ export default function RegistrationsPage() {
                                                         тел: <b>{r.phone}</b> ·{" "}
                                                     </>
                                                 ) : null}
-                                                статус: <span className="font-semibold text-orange-600">{r.status}</span>
+                                                <span className={"font-semibold " + (r.status === "reserve_pending" ? "text-orange-700" : r.status === "reserve" ? "text-slate-700" : "text-orange-600")}>{statusLabel(r.status)}</span>
 
                                                 {r.mode === "TEAM" && r.status === "accepted" ? (
                                                     <>
@@ -470,23 +481,37 @@ export default function RegistrationsPage() {
                                                         Отклонить
                                                     </button>
                                                 </>
-                                            ) : r.status === "accepted" ? (
-                                                <button
-                                                    disabled={busyId === r.id || regsLocked}
-                                                    className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-100 disabled:opacity-50"
-                                                    onClick={() => act(r.id, "unaccept" as any)}
-                                                >
-                                                    Снять принятие
-                                                </button>
+                                            ) : r.status === "accepted" || r.status === "reserve" || r.status === "reserve_pending" ? (
+                                                <>
+                                                    <button
+                                                        disabled={busyId === r.id || regsLocked}
+                                                        className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-100 disabled:opacity-50"
+                                                        onClick={() => act(r.id, "unaccept" as any)}
+                                                    >
+                                                        Снять принятие
+                                                    </button>
+
+                                                    {r.status === "reserve_pending" && (
+                                                        <button
+                                                            disabled={busyId === r.id || regsLocked}
+                                                            className="min-w-[85px] rounded-xl h-9 bg-orange-600 px-3 py-2 text-sm font-bold flex items-center justify-center gap-2 leading-none text-white disabled:opacity-50"
+                                                            onClick={() => act(r.id, "confirm_reserve")}
+                                                            title="Подтвердить переход в основной список (если место ещё свободно)"
+                                                        >
+                                                            В основу
+                                                        </button>
+                                                    )}
+                                                </>
                                             ) : (
                                                 <div className="text-xs text-slate-500">Заявка снята</div>
                                             )}
+
 
                                             {r.mode === "SOLO" && r.status === "accepted" && (
                                                 <button
                                                     disabled={busyId === r.id || regsLocked || tournament?.status !== "draft" || payBusyKey === `${r.id}:1`}
                                                     className={
-                                                        "min-w-[80px] rounded-xl h-9 px-3 py-2 text-sm font-bold border flex items-center justify-center gap-2 leading-none " +
+                                                        "min-w-[85px] rounded-xl h-9 px-3 py-2 text-sm font-bold border flex items-center justify-center gap-2 leading-none " +
                                                         (fullyPaid(r)
                                                             ? "border-emerald-200 bg-emerald-50 text-emerald-700"
                                                             : "border-slate-200 hover:bg-slate-50")

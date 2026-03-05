@@ -130,7 +130,14 @@ export async function POST(req: Request, context: { params: Promise<{ id: string
     if (f.status === "finished") return NextResponse.json({ ok: false, error: "Tournament finished" }, { status: 400 });
 
     try {
-        await assertAllAcceptedPaid(tournamentId);
+        // Once the first match starts, any reserve candidates can no longer be promoted.
+await supabaseAdmin
+    .from("registrations")
+    .update({ status: "reserve" })
+    .eq("tournament_id", tournamentId)
+    .eq("status", "reserve_pending");
+
+await assertAllAcceptedPaid(tournamentId);
     } catch {
         return NextResponse.json({ ok: false, error: "Р•СЃС‚СЊ РїРѕРґС‚РІРµСЂР¶РґС‘РЅРЅС‹Рµ Р·Р°СЏРІРєРё Р±РµР· РІР·РЅРѕСЃР°" }, { status: 400 });
     }

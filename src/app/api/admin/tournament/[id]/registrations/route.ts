@@ -37,10 +37,10 @@ GET algorithm (dashboard snapshot):
       */
 
 import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 import { requireAdminOr401 } from "@/lib/adminAuth";
 import { getTournamentFlags } from "@/lib/tournamentGuards";
+import { acceptWithReserve, confirmReservePromotion, ensureReserveCandidate, unacceptWithReserve } from "@/lib/reserve";
 
 export async function GET(
     _req: Request,
@@ -136,101 +136,35 @@ export async function POST(
     }
 
     if (action === "unaccept") {
-        if (reg.status !== "accepted") {
-            return NextResponse.json({ ok: false, error: "Not accepted" }, { status: 400 });
-        }
-
-        // rollback
-        const { data: teams } = await supabaseAdmin
-            .from("teams")
-            .select("id")
-            .eq("registration_id", reg.id);
-
-        const teamIds = (teams ?? []).map((t: any) => t.id);
-
-        if (teamIds.length) {
-            await supabaseAdmin.from("team_members").delete().in("team_id", teamIds);
-            await supabaseAdmin.from("teams").delete().in("id", teamIds);
-        }
-
-        await supabaseAdmin.from("players").delete().eq("registration_id", reg.id);
-
-        await supabaseAdmin.from("registrations").update({ status: "pending" }).eq("id", reg.id);
-
-        return NextResponse.json({ ok: true });
+    if (reg.status !== "accepted" && reg.status !== "reserve" && reg.status !== "reserve_pending") {
+        return NextResponse.json({ ok: false, error: "Not accepted" }, { status: 400 });
     }
 
-    // accept:
-    const { error: e2 } = await supabaseAdmin
-        .from("registrations")
-        .update({ status: "accepted" })
-        .eq("id", registrationId);
-
-    if (e2) return NextResponse.json({ ok: false, error: e2 }, { status: 400 });
-
-    if (reg.mode === "SOLO") {
-        const { error } = await supabaseAdmin.from("players").insert({
-            tournament_id: tournamentId,
-            full_name: reg.solo_player,
-            strength: reg.strength ?? 3,
-            registration_id: reg.id,
-        });
-        if (error) return NextResponse.json({ ok: false, error }, { status: 400 });
-        return NextResponse.json({ ok: true });
-    }
-
-    // TEAM accept: create 3 players + team + members
-    const names = [reg.team_player1, reg.team_player2, reg.team_player3].filter(Boolean);
-    if (names.length !== 3) {
-        return NextResponse.json({ ok: false, error: "TEAM needs 3 names" }, { status: 400 });
-    }
-
-    // 1) create 3 players linked to this registration
-    const { data: insertedPlayers, error: e3 } = await supabaseAdmin
-        .from("players")
-        .insert(
-            names.map((full_name: string) => ({
-                tournament_id: tournamentId,
-                full_name,
-                strength: reg.strength ?? 3,
-                registration_id: reg.id,
-            }))
-        )
-        .select("id, full_name");
-
-    if (e3 || !insertedPlayers) {
-        return NextResponse.json({ ok: false, error: e3 }, { status: 400 });
-    }
-
-    // 2) create team linked to this registration
-    const teamName = names.join(" / ");
-
-    const { data: team, error: e4 } = await supabaseAdmin
-        .from("teams")
-        .insert({
-            tournament_id: tournamentId,
-            name: teamName,
-            points: 0,
-            registration_id: reg.id,
-        })
-        .select("id")
-        .single();
-
-    if (e4 || !team) {
-        return NextResponse.json({ ok: false, error: e4 }, { status: 400 });
-    }
-
-    // 3) create team_members
-    const memberRows = insertedPlayers.map((p: any, idx: number) => ({
-        team_id: team.id,
-        player_id: p.id,
-        slot: idx + 1,
-    }));
-
-    const { error: e5 } = await supabaseAdmin.from("team_members").insert(memberRows);
-    if (e5) {
-        return NextResponse.json({ ok: false, error: e5 }, { status: 400 });
+    try {
+        await unacceptWithReserve(tournamentId, reg);
+    } catch (e: any) {
+        return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 400 });
     }
 
     return NextResponse.json({ ok: true });
 }
+
+if (action === "confirm_reserve") {
+    try {
+        const r = await confirmReservePromotion(tournamentId, registrationId);
+        return NextResponse.json({ ok: true, promoted: r.promoted, status: r.status });
+    } catch (e: any) {
+        return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 400 });
+    }
+}
+
+// accept:
+
+    try {
+        const r = await acceptWithReserve(tournamentId, registrationId);
+        return NextResponse.json({ ok: true, status: r.status });
+    } catch (e: any) {
+        return NextResponse.json({ ok: false, error: String(e?.message ?? e) }, { status: 400 });
+    }
+}
+

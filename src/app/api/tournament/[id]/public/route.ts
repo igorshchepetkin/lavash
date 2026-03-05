@@ -55,7 +55,7 @@ export async function GET(
             .order("court", { ascending: true })
         : { data: [] as any[] };
 
-    // РІР°Р¶РЅРѕ РґР»СЏ РІРёС‚СЂРёРЅС‹: РїРѕРєР°Р·Р°С‚СЊ СЃС‚СЂРµР»РєРё/РїРµСЂРµС…РѕРґС‹ С‚РѕР»СЊРєРѕ РїРѕРєР° СЃР»РµРґСѓСЋС‰РёР№ РјР°С‚С‡ РќР• СЃС‚Р°СЂС‚РѕРІР°Р»
+    // важно для витрины: показать стрелки/переходы только пока следующий матч НЕ стартовал
     const latestNum = latestStage?.number ?? 0;
 
     const { data: nextStageRow } = latestNum
@@ -69,6 +69,37 @@ export async function GET(
 
     const nextStageExists = !!nextStageRow;
 
+    // For draft tournaments we expose the list of "accepted by judge" registrations.
+    // This includes both main (accepted) and reserve (reserve/reserve_pending) statuses.
+    // UI decides how to render / label them. We intentionally do NOT expose pending/rejected here.
+    const { data: acceptedRegs } =
+        t.status === "draft"
+            ? await supabaseAdmin
+                .from("registrations")
+                .select("id, status, mode, solo_player, team_player1, team_player2, team_player3, created_at")
+                .eq("tournament_id", tournamentId)
+                .in("status", ["accepted", "reserve", "reserve_pending"])
+                .order("created_at", { ascending: true })
+            : { data: [] as any[] };
+
+    const registrations = (acceptedRegs ?? []).map((r: any) => {
+        const full_name =
+            r.mode === "SOLO"
+                ? r.solo_player
+                : [r.team_player1, r.team_player2, r.team_player3].filter(Boolean).join(" / ");
+
+        return {
+            id: r.id,
+            status: r.status,
+            is_reserve: r.status === "reserve" || r.status === "reserve_pending",
+            full_name,
+            created_at: r.created_at,
+        };
+    });
+
+    // Keep reserve list for compatibility, but UI should generally use `registrations`.
+    const reserve = registrations.filter((r: any) => r.is_reserve);
+
     return NextResponse.json({
         ok: true,
         tournament: t,
@@ -76,5 +107,7 @@ export async function GET(
         latestStage,
         games: games ?? [],
         nextStageExists,
+        registrations,
+        reserve,
     });
 }

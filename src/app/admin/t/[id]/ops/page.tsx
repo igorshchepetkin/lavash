@@ -829,7 +829,7 @@ function GameCard(props: {
                 <div className="font-extrabold">Корт {props.court}
                     {props.points != null ? (
                         <span className="ml-2 text-xs font-bold text-slate-500">
-                            (+{props.points} очков)
+                            Очки: +{props.points}
                         </span>
                     ) : null}
                 </div>
