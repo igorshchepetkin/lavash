@@ -611,8 +611,6 @@ export default function OpsPage() {
                 ) : null}
 
                 {!finished ? (
-
-                    /* ===== ТЕКУЩИЙ МАТЧ ===== */
                     <section className="mt-6 rounded-2xl border border-slate-200 p-5">
                         <div className="flex items-center justify-between">
                             <h2 className="text-lg font-bold">Текущий матч</h2>
@@ -675,10 +673,7 @@ export default function OpsPage() {
                             )}
                         </div>
                     </section>
-
                 ) : (
-
-                    /* ===== ИТОГИ ТУРНИРА ===== */
                     <section className="mt-6 rounded-2xl border border-orange-200 bg-orange-50 p-5">
                         <div className="flex items-center justify-between">
                             <h2 className="text-lg font-extrabold text-orange-700">
@@ -709,7 +704,6 @@ export default function OpsPage() {
                             ))}
                         </div>
                     </section>
-
                 )}
 
                 {!finished && (
@@ -779,20 +773,6 @@ function GameCard(props: {
     const winnerCourt = Math.max(1, props.court - 1);
     const loserCourt = Math.min(4, props.court + 1);
 
-    const showMoveA =
-        !!resolvedWinner &&
-        (
-            (resolvedWinner === props.teamA.id && props.court > 1) ||
-            (resolvedWinner !== props.teamA.id && props.court < 4)
-        );
-
-    const showMoveB =
-        !!resolvedWinner &&
-        (
-            (resolvedWinner === props.teamB.id && props.court > 1) ||
-            (resolvedWinner !== props.teamB.id && props.court < 4)
-        );
-
     function moveBadge(teamId: string) {
         if (!resolvedWinner) return null;
 
@@ -808,7 +788,7 @@ function GameCard(props: {
         return (
             <span
                 className={
-                    "ml-2 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-extrabold " +
+                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-extrabold " +
                     (isWinner ? "bg-emerald-100 text-emerald-700" : "bg-red-100 text-red-700")
                 }
                 title={isWinner ? "Победитель поднимается выше" : "Проигравший опускается ниже"}
@@ -826,7 +806,8 @@ function GameCard(props: {
             }
         >
             <div className="flex items-center justify-between">
-                <div className="font-extrabold">Корт {props.court}
+                <div className="font-extrabold">
+                    Корт {props.court}
                     {props.points != null ? (
                         <span className="ml-2 text-xs font-bold text-slate-500">
                             Очки: +{props.points}
@@ -846,9 +827,8 @@ function GameCard(props: {
 
             <div className="mt-3 grid gap-2">
                 <label className="text-sm font-bold text-slate-600">Выберите победителя</label>
-                <div className="mt-4 flex flex-col items-center gap-3">
 
-                    {/* КНОПКА КОМАНДЫ A */}
+                <div className="mt-4 flex flex-col items-center gap-3">
                     <button
                         type="button"
                         disabled={props.done || props.busy}
@@ -861,16 +841,22 @@ function GameCard(props: {
                             (props.done ? " opacity-60 cursor-not-allowed" : "")
                         }
                     >
-                        {props.teamA.name}
-                        {props.done ? moveBadge(props.teamA.id) : null}
+                        <div className="flex items-start justify-between gap-2">
+                            <div className="min-h-[2.75rem] flex-1">
+                                <div className="line-clamp-2 break-words text-center text-sm font-bold leading-tight">
+                                    {props.teamA.name}
+                                </div>
+                            </div>
+                            <div className="shrink-0 pt-0.5">
+                                {props.done ? moveBadge(props.teamA.id) : null}
+                            </div>
+                        </div>
                     </button>
 
-                    {/* VS */}
-                    <div className="text-xs font-extrabold text-slate-400 tracking-widest">
+                    <div className="text-xs font-extrabold tracking-widest text-slate-400">
                         VS
                     </div>
 
-                    {/* КНОПКА КОМАНДЫ B */}
                     <button
                         type="button"
                         disabled={props.done || props.busy}
@@ -883,8 +869,16 @@ function GameCard(props: {
                             (props.done ? " opacity-60 cursor-not-allowed" : "")
                         }
                     >
-                        {props.teamB.name}
-                        {props.done ? moveBadge(props.teamB.id) : null}
+                        <div className="flex items-start justify-between gap-2">
+                            <div className="min-h-[2.75rem] flex-1">
+                                <div className="line-clamp-2 break-words text-center text-sm font-bold leading-tight">
+                                    {props.teamB.name}
+                                </div>
+                            </div>
+                            <div className="shrink-0 pt-0.5">
+                                {props.done ? moveBadge(props.teamB.id) : null}
+                            </div>
+                        </div>
                     </button>
                 </div>
 
@@ -909,7 +903,7 @@ function GameCard(props: {
                 ) : (
                     <button
                         disabled={!canSave || props.busy}
-                        className="mt-2 rounded-xl bg-orange-600 px-3 py-2 text-sm font-bold text-white hover:bg-orange-700 disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                        className="mt-2 inline-flex items-center justify-center gap-2 rounded-xl bg-orange-600 px-3 py-2 text-sm font-bold text-white hover:bg-orange-700 disabled:opacity-50"
                         onClick={async () => {
                             setSaving(true);
                             try {
