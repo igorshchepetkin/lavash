@@ -42,14 +42,24 @@ CREATE TABLE IF NOT EXISTS public.tournaments (
 -- Purpose:
 --   Applications submitted before the tournament starts.
 --   TEAM: 3 player names; SOLO: 1 player (first/last/full), phone, etc.
---   Stores confirmation_code for withdraw flows (optional).
+--   Stores confirmation_code for withdraw flows and reserve-confirm flows.
 --
 -- Usage:
 --   - Admin: accept/reject/unaccept while tournament is draft.
 --   - Accepted registrations lead to creating players (+ team in TEAM mode).
+--   - Reserve model:
+--       * accepted        = in the main roster
+--       * reserve         = accepted by judge but outside roster capacity
+--       * reserve_pending = invited from reserve to main roster, waiting confirmation
 --   - strength is used:
 --       * TEAM: team-level strength (single value).
 --       * SOLO: player-level strength stored on registration (then synced to players depending on flow).
+--
+-- Important:
+--   - Main roster capacity is app-level, not DB-level:
+--       * SOLO: 24 accepted registrations
+--       * TEAM: 8 accepted registrations
+--   - Reserve/reserve_pending registrations do NOT create players/teams until promoted.
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS public.registrations (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -60,7 +70,15 @@ CREATE TABLE IF NOT EXISTS public.registrations (
   team_player3 text,
   solo_player text,
   strength integer CHECK (strength >= 1 AND strength <= 5),
-  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY['pending'::text, 'accepted'::text, 'rejected'::text, 'withdrawn'::text, 'canceled'::text])),
+  status text NOT NULL DEFAULT 'pending'::text CHECK (status = ANY (ARRAY[
+    'pending'::text,
+    'accepted'::text,
+    'reserve'::text,
+    'reserve_pending'::text,
+    'rejected'::text,
+    'withdrawn'::text,
+    'canceled'::text
+  ])),
   created_at timestamp with time zone NOT NULL DEFAULT now(),
   confirmation_code text,
   solo_first_name text,
@@ -79,6 +97,7 @@ CREATE TABLE IF NOT EXISTS public.registrations (
 --   - SOLO: accepted registration -> one player row. strength per player (1..5).
 --           optional seeding: seed_team_index (1..8), seed_slot (1..3).
 --   - TEAM: accepted TEAM registration -> three player rows; linked to team via team_members.
+--   - Reserve registrations do not generate players until actually promoted to accepted.
 --
 -- Bucket logic (SOLO, implementation detail):
 --   Players are ranked deterministically by:
@@ -110,6 +129,7 @@ CREATE TABLE IF NOT EXISTS public.players (
 --           UI derives team_index 1..8 by ordering teams.created_at ASC.
 --           reset-teams deletes teams + team_members to allow rebuild.
 --   - TEAM: accepting TEAM registration creates team linked to registration_id.
+--   - Reserve registrations do not generate teams until promotion to accepted.
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS public.teams (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -131,6 +151,7 @@ CREATE TABLE IF NOT EXISTS public.teams (
 -- Usage:
 --   - SOLO build-teams: fills 8 teams * 3 slots = 24 rows.
 --   - TEAM accept: fills one team with 3 players.
+--   - Reserve registrations do not create team_members.
 --
 -- Constraints:
 --   - PRIMARY KEY (team_id, slot): one player per slot.
@@ -236,6 +257,10 @@ CREATE TABLE IF NOT EXISTS public.tournament_points_overrides (
 -- Guards:
 --   assertAllAcceptedPaid(tournamentId) blocks build-teams and start if any accepted
 --   registration has unpaid required slots.
+--
+-- Notes:
+--   - Reserve/reserve_pending registrations may still keep payment rows if judge used payment UI
+--     before or after moving statuses, but only accepted registrations are relevant for build/start guards.
 -- =====================================================================
 CREATE TABLE IF NOT EXISTS public.registration_payments (
   id uuid NOT NULL DEFAULT gen_random_uuid(),
@@ -282,6 +307,12 @@ CREATE UNIQUE INDEX IF NOT EXISTS ux_registration_payments_registration_slot
 -- 5) Performance indexes for common filters
 CREATE INDEX IF NOT EXISTS ix_registrations_tournament_id
   ON public.registrations (tournament_id);
+
+CREATE INDEX IF NOT EXISTS ix_registrations_tournament_status_created_at
+  ON public.registrations (tournament_id, status, created_at);
+
+CREATE INDEX IF NOT EXISTS ix_registrations_tournament_confirmation_code
+  ON public.registrations (tournament_id, confirmation_code);
 
 CREATE INDEX IF NOT EXISTS ix_players_tournament_id
   ON public.players (tournament_id);

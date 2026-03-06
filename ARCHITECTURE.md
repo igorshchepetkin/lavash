@@ -14,6 +14,20 @@ Public apply flow:
    returns confirmation_code.
 4) UI shows “Код подтверждения”.
 
+Public reserve confirm flow:
+1) GET `/t/[id]/reserve-confirm` loads tournament mode and renders reserve confirmation form.
+2) User enters:
+   - phone,
+   - confirmation code,
+   - last name (SOLO) or any player name (TEAM).
+3) UI submits POST `/api/tournament/[id]/reserve-confirm`.
+4) API finds the registration by tournament + confirmation code (with case-insensitive fallback),
+   verifies identity fields and calls reserve promotion logic.
+5) Response returns:
+   - `promoted: true` if user moved into main roster,
+   - `promoted: false` if slot has already been taken and registration stays in reserve.
+6) UI shows result, disables submit button and redirects back to showcase after countdown.
+
 Admin flow:
 1) /admin shows tournaments
 2) /admin/t/[id]/registrations:
@@ -40,6 +54,7 @@ Admin flow:
     - stage 1: seededPairs optional + random fill from teams
     - stage 2+: pairs by team_state.current_court (2 teams per court)
   - updates tournament.status to live
+  - resets all `reserve_pending` registrations back to `reserve`
 
 ## Finish mechanics
 - Finish endpoint:
@@ -55,6 +70,7 @@ src/
     t/[id]/page.tsx               (showcase)
     t/[id]/apply/page.tsx         (public apply form)
     t/[id]/withdraw/page.tsx      (public winthdraw form)
+    t/[id]/reserve-confirm/page.tsx
     admin/page.tsx                (admin tournaments)
     admin/t/[id]/registrations/page.tsx
     admin/t/[id]/ops/page.tsx
@@ -63,6 +79,7 @@ src/
       tournament/[id]/apply/route.ts
       tournament/[id]/mode/route.ts
       tournament/[id]/public/route.ts
+      tournament/[id]/reserve-confirm/route.ts
       tournament/[id]/withdraw/route.ts
       admin/
         login/route.ts
@@ -87,11 +104,12 @@ src/
 
   lib/
     supabaseAdmin.ts              (service role client)
-    supabasePublic.ts             
-    payments.ts             
+    supabasePublic.ts
+    payments.ts
     adminAuth.ts                  (cookie guard requireAdminOr401)
-    requireAdmin.ts             
+    requireAdmin.ts
     tournamentGuards.ts           (getTournamentFlags: canceled/started/finished/status)
+    reserve.ts                    (reserve queue / promotion helpers)
 
 ## Key pages
 ### /admin (AdminHome)
@@ -109,6 +127,10 @@ src/
   - SOLO: single “Взнос” toggle when accepted
   - TEAM: 3 toggles, one per slot/person, with progress “взнос X/3”
 - Manual add registration (draft only)
+- Reserve controls:
+  - accepting beyond capacity creates reserve registrations
+  - reserve and reserve_pending can be unaccepted
+  - judge can manually confirm promotion from `reserve_pending`
 
 ### /admin/t/[id]/ops
 - Tournament status + actions:
@@ -128,6 +150,19 @@ src/
   - Before build-teams: admin can assign seed_team_index 1..8 per player (max 8, unique per team)
   - Before start: show bucket membership and final team assignment
 
+### /t/[id] (showcase)
+- In draft:
+  - SOLO: before teams are built, shows accepted registrations list instead of team rating
+  - TEAM: before match 1 starts, shows accepted registrations list instead of team rating
+  - reserve registrations are displayed at bottom of the list, under divider “Резерв”
+  - there is a public link to reserve confirmation page if any reserve exists
+- After teams exist / after start:
+  - shows team rating
+- Current match:
+  - 2x2 court grid like ops page
+  - points label shown in card header as `Очки: +N`
+  - winner/loser movement badges match ops visual style while next stage is not yet started
+
 ## Guards
 - `getTournamentFlags(tournamentId)`:
   - started = status !== draft
@@ -141,3 +176,41 @@ src/
 - SOLO team strength: sum of 3 players’ strengths from team_members.
 - TEAM team strength: registration.strength via teams.registration_id -> registrations.strength.
 - First match pairing uses strength ordering, with randomization for ties.
+
+---
+
+## Reserve model
+Main roster capacity:
+- SOLO = 24 registrations
+- TEAM = 8 registrations
+
+Statuses:
+- `pending` — new application
+- `accepted` — in main roster
+- `reserve` — waiting in reserve queue
+- `reserve_pending` — reserve invitation sent, waiting for confirmation
+- `rejected` / `withdrawn` / `canceled` — terminal / excluded states
+
+Acceptance behavior:
+- judge pressing “Accept” does not always mean “accepted into main roster”
+- if capacity already full, registration is put into `reserve`
+- reserve registrations do not create players/teams/team_members and are excluded from team build / match start mechanics
+
+Automatic promotion candidate:
+- when a main roster slot becomes free:
+  - SOLO: accepted count drops from 24 to 23
+  - TEAM: accepted count drops from 8 to 7
+- oldest `reserve` registration by `created_at` becomes `reserve_pending`
+
+Confirmation:
+- can be done by:
+  - public user via `/api/tournament/[id]/reserve-confirm`
+  - judge from admin registrations page
+- promotion is race-safe:
+  - if slot is free at confirmation moment → registration becomes `accepted`
+  - otherwise registration returns to `reserve`
+
+Start boundary:
+- after first match starts, reserve remains only informational
+- all `reserve_pending` are downgraded back to `reserve`
+- no further promotion into main roster is allowed after tournament start

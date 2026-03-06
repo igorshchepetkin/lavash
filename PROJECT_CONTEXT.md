@@ -14,11 +14,26 @@ Public apply flow:
    returns confirmation_code.
 4) UI shows “Код подтверждения”.
 
+Public reserve confirm flow:
+1) If a slot in main roster opens up, the oldest reserve registration is moved to `reserve_pending`.
+2) Applicant opens `/t/[id]/reserve-confirm`.
+3) Public form submits POST `/api/tournament/[id]/reserve-confirm`.
+4) API verifies:
+   - confirmation code (case-insensitive),
+   - phone,
+   - last name for SOLO or any one player name for TEAM.
+5) API calls reserve promotion logic:
+   - if slot is still free, registration becomes accepted and is promoted to main roster,
+   - if slot is already occupied, registration remains in reserve.
+6) UI shows success/result message and auto-returns to tournament showcase.
+
 Admin flow:
 1) /admin shows tournaments
 2) /admin/t/[id]/registrations:
    - shows tournament header + registration stats (pending/accepted/total)
    - can add registration (only if not canceled/finished; ideally only draft)
+   - accepts registrations into main roster or reserve depending on capacity
+   - can confirm reserve promotion manually for `reserve_pending`
 3) /admin/t/[id]/ops:
    - "Start match" calls POST /api/admin/tournament/[id]/start
    - entering results calls POST /api/admin/tournament/[id]/game/result
@@ -42,6 +57,7 @@ Admin flow:
     - stage 1: seededPairs optional + random fill from teams
     - stage 2+: pairs by team_state.current_court (2 teams per court)
   - updates tournament.status to live
+  - before first stage starts, all `reserve_pending` registrations are returned back to `reserve`
 
 ## Finish mechanics
 - Finish endpoint:
@@ -56,7 +72,8 @@ src/
     page.tsx                      (public list)
     t/[id]/page.tsx               (showcase)
     t/[id]/apply/page.tsx         (public apply form)
-    t/[id]/withdraw/page.tsx      (public winthdraw form)
+    t/[id]/withdraw/page.tsx      (public withdraw form)
+    t/[id]/reserve-confirm/page.tsx
     admin/page.tsx                (admin tournaments)
     admin/t/[id]/registrations/page.tsx
     admin/t/[id]/ops/page.tsx
@@ -65,6 +82,7 @@ src/
       tournament/[id]/apply/route.ts
       tournament/[id]/mode/route.ts
       tournament/[id]/public/route.ts
+      tournament/[id]/reserve-confirm/route.ts
       tournament/[id]/withdraw/route.ts
       admin/
         login/route.ts
@@ -91,11 +109,12 @@ src/
 
   lib/
     supabaseAdmin.ts              (service role client)
-    supabasePublic.ts             
-    payments.ts             
+    supabasePublic.ts
+    payments.ts
     adminAuth.ts                  (cookie guard requireAdminOr401)
-    requireAdmin.ts             
+    requireAdmin.ts
     tournamentGuards.ts           (getTournamentFlags: canceled/started/finished/status)
+    reserve.ts                    (reserve capacity / promotion logic)
 
 ## Key pages
 ### /admin (AdminHome)
@@ -113,6 +132,14 @@ src/
   - SOLO: single “Взнос” toggle when accepted
   - TEAM: 3 toggles, one per slot/person, with progress “взнос X/3”
 - Manual add registration (draft only)
+- Reserve-specific behavior:
+  - if accepted count is already full, newly accepted registration goes to reserve
+  - statuses:
+    - `accepted` = in main roster
+    - `reserve` = waiting in reserve
+    - `reserve_pending` = invited to move from reserve to main roster, waiting for confirmation
+  - admin can remove acceptance both from main roster and reserve
+  - admin can manually confirm promotion for `reserve_pending`
 
 ### /admin/t/[id]/ops
 - Tournament status + actions:
@@ -133,6 +160,19 @@ src/
   - shows bucket membership and team assignment (after build)
   - allows setting seed_team_index 1..8 per player (max 8, unique per team) before build
   - strength and seeding are locked after build until reset
+
+### /t/[id] (public showcase)
+- Shows tournament status and current match
+- Before teams exist / before match 1 in TEAM mode:
+  - shows accepted registrations list instead of team rating
+  - reserve registrations are shown at the bottom, marked “Резерв”
+  - if reserve exists, shows link to reserve confirmation page
+- After teams exist (SOLO) or after first match starts (TEAM):
+  - shows team rating
+- Current match courts:
+  - 2x2 card grid
+  - court points shown as `Очки: +N`
+  - winner / loser movement badges shown like in ops while next stage has not started yet
 
 ## Guards
 - `getTournamentFlags(tournamentId)`:
@@ -184,6 +224,37 @@ POST /api/admin/tournament/[id]/reset-teams:
 
 Purpose:
 - allow judge to rebuild teams after adjusting strength or seeds
+
+## Reserve roster logic
+Capacity:
+- SOLO main roster capacity = 24 accepted registrations
+- TEAM main roster capacity = 8 accepted registrations
+
+Acceptance:
+- if judge accepts within capacity → registration.status = `accepted`
+- if judge accepts above capacity → registration.status = `reserve`
+- reserve registrations do not create players/teams/team_members and do not participate in tournament mechanics
+
+Automatic invitation from reserve:
+- when one main slot becomes free (SOLO: accepted count becomes 23; TEAM: accepted count becomes 7),
+  the oldest reserve registration by `created_at` is moved to `reserve_pending`
+
+Promotion confirmation:
+- requires confirmation because applicant plans may change
+- may be confirmed:
+  - publicly via `/t/[id]/reserve-confirm`
+  - by judge in admin registrations page
+- if at confirmation time the main roster is already full, registration returns to `reserve`
+
+Visibility:
+- reserve and reserve_pending are not part of built teams / current tournament roster
+- on public showcase before tournament start they are shown only in registrations list, marked as reserve
+- reserve_pending is intentionally not visually distinguished from reserve on showcase
+- after first match starts, reserve remains hidden from the showcase roster UI
+
+Start boundary:
+- when first match starts, all `reserve_pending` registrations are returned to `reserve`
+- after start, promotion from reserve to main roster is no longer allowed
 
 ## Ops page UI state machine (SOLO)
 Before match 1:
