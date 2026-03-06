@@ -363,7 +363,7 @@ export default function OpsPage() {
                                 title={!canStartNext ? "Чтобы стартовать следующий матч, сохрани результаты всех игр" : ""}
                             >
                                 {startingMatch ? <Spinner className="h-4 w-4 border-white/40 border-t-white" /> : null}
-                                {!canStartNext ? "Матч №" + latestNum + " в процессе..." : (startingMatch ? "Матч запускается..." : "Стартовать Матч №" + nextMatchNumber)}
+                                {!canStartNext ? "Матч №" + latestNum + " в процессе..." : (startingMatch ? "Запуск матча..." : "Стартовать Матч №" + nextMatchNumber)}
                             </button>
 
                             {!finished && latestNum > 0 ? (
