@@ -178,7 +178,7 @@ export async function POST(req: Request) {
       expires_at: expiresAt,
       last_activity_at: now.toISOString(),
       ip: meta.ip,
-      user_agent: meta.userAgent,
+      user_agent: meta.user_agent,
     })
     .select("id")
     .single();
