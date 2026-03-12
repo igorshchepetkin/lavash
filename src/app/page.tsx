@@ -158,12 +158,6 @@ export default function Home() {
             >
               Архив турниров
             </a>
-            <a
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50"
-              href="/admin"
-            >
-              Админка
-            </a>
           </div>
         </div>
 
