@@ -1,3 +1,36 @@
+// src/lib/payments.ts
+/*
+Purpose:
+Payment-state helpers for tournament registrations.
+
+Responsibilities:
+1. Interpret `registration_payments` rows by mode:
+   - SOLO: usually slot 1 only
+   - TEAM: slots 1..3
+2. Count paid slots for a registration.
+3. Determine whether a registration is fully paid.
+4. Enforce build/start guards using accepted registrations only.
+
+Typical helper:
+- assertAllAcceptedPaid(tournamentId)
+
+assertAllAcceptedPaid algorithm:
+1. Load accepted registrations for the tournament.
+2. For each accepted registration:
+   - SOLO: require slot 1 paid
+   - TEAM: require slots 1, 2, 3 paid
+3. If any accepted registration is incomplete:
+   - throw / return an error usable by API routes
+4. Otherwise allow build-teams / start flow to continue.
+
+Important business rule:
+- Only `accepted` registrations are relevant for the payment readiness guard.
+- `reserve` and `reserve_pending` may have payment rows, but do not block tournament start.
+
+Outcome:
+Provides the payment-readiness logic required before building teams or starting matches.
+*/
+
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export async function assertAllAcceptedPaid(tournamentId: string) {

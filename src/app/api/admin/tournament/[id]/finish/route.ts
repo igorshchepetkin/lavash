@@ -1,28 +1,39 @@
 // src/app/api/admin/tournament/[id]/finish/route.ts
 /*
-Purpose: Finalize a tournament (mark it finished) only when the last match is fully scored.
+Purpose:
+Finish a tournament after the last current stage is fully completed.
+
 Algorithm:
 
-1. Require admin (`requireAdminOr401`).
-2. Block if tournament canceled; if already finished -> `{ ok:true }`.
-3. Fetch the latest stage by `number` desc. If no stages exist -> reject (“no match has started”).
-4. Load all games for the latest stage and verify completeness: each game must have `winner_team_id`. If any missing -> reject (“not all results entered”).
-5. Mark all games in the latest stage as `is_final:true` (used by the public showcase to highlight final match set).
-6. Update tournament status to `"finished"`.
-   Outcome: Tournament moves into a terminal “finished” state; final games are flagged for the public view.
-   */
+1. Require authorized tournament manager access.
+2. Load tournament and latest stage.
+3. Reject if:
+   - tournament is canceled
+   - tournament is already finished
+   - no started stage exists when business rules require at least one stage
+4. Load games of the latest stage.
+5. Require every game in the latest stage to have a winner.
+6. Optionally mark latest-stage games with `is_final=true`.
+7. Update `tournaments.status='finished'`.
+8. Return `{ ok:true }`.
+
+Outcome:
+Closes the tournament lifecycle and prevents starting new stages or editing competitive state further.
+*/
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdminOr401 } from "@/lib/adminAuth";
+import { requireTournamentManagerOr401 } from "@/lib/adminAccess";
+import { sessionJson, unauthorized } from "@/lib/adminApi";
 import { getTournamentFlags } from "@/lib/tournamentGuards";
 
 export async function POST(_req: Request, context: any) {
   const { id } = await context.params;
   const tournamentId = id;
 
-  if (!(await requireAdminOr401())) {
-    return NextResponse.json({ ok: false, error: "NOT_ADMIN" }, { status: 401 });
+  const ctx = await requireTournamentManagerOr401(tournamentId);
+    if (!ctx) {
+    return unauthorized()
   }
 
   const f = await getTournamentFlags(tournamentId);

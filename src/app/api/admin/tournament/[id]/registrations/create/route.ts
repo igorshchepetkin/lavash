@@ -1,21 +1,31 @@
 // src/app/api/admin/tournament/[id]/registrations/create/route.ts
 /*
-Purpose: Admin-side creation of a pending registration with a confirmation code (mode-aware).
-Preconditions: admin required; tournament not canceled and not started.
+Purpose:
+Manually create a new tournament registration from the admin registrations page.
+
 Algorithm:
 
-1. Load tournament registration_mode.
-2. Generate a random `confirmation_code` (10 chars).
-3. If SOLO: validate last/first name and E.164-like phone (must start with '+'); build `solo_player = "Last First"`.
-4. Insert into `registrations` with `status:"pending"`, `strength:3` default, store `solo_*` fields and phone.
-5. If TEAM: validate 3 names + phone; insert `registrations` row with team_player1..3, `status:"pending"`, and confirmation_code.
-6. Return `{ ok:true, registration_id, confirmation_code }`.
-   Outcome: Creates a “manual/admin-entered” registration that can later be accepted and paid, using the same pipeline as public registrations.
-   */
+1. Require tournament manager access.
+2. Read tournament mode and status.
+3. Reject if registrations are locked:
+   - tournament canceled
+   - tournament finished
+   - tournament already started
+4. Parse mode-specific payload:
+   - SOLO: first name, last name, phone
+   - TEAM: three player names, phone
+5. Generate a confirmation code using the same business rules as public registration.
+6. Insert a new `registrations` row in `pending` status.
+7. Return `{ ok:true, confirmation_code }`.
+
+Outcome:
+Lets the judge add a participant manually and immediately hand over the generated confirmation code.
+*/
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdminOr401 } from "@/lib/adminAuth";
+import { requireTournamentManagerOr401 } from "@/lib/adminAccess";
+import { sessionJson, unauthorized } from "@/lib/adminApi";
 import { getTournamentFlags } from "@/lib/tournamentGuards";
 
 function makeCode(len = 10) {
@@ -29,8 +39,9 @@ export async function POST(req: Request, context: any) {
   const { id } = await context.params;
   const tournamentId = id;
 
-  if (!(await requireAdminOr401())) {
-    return NextResponse.json({ ok: false, error: "NOT_ADMIN" }, { status: 401 });
+  const ctx = await requireTournamentManagerOr401(tournamentId);
+    if (!ctx) {
+    return unauthorized()
   }
 
   const f = await getTournamentFlags(tournamentId);

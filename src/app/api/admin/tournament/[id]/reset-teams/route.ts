@@ -1,30 +1,44 @@
 // src/app/api/admin/tournament/[id]/reset-teams/route.ts
 /*
-Purpose: Delete all built teams for a SOLO tournament while still in draft, allowing rebuild.
-Preconditions: admin required; tournament not canceled; tournament status must be `draft`; tournament mode must be `SOLO`.
+Purpose:
+Remove previously built SOLO teams so the judge can rebuild them after adjusting strength or seeding.
+
 Algorithm:
 
-1. Fetch all team ids for the tournament.
-2. Delete `team_members` where team_id IN (teamIds) first (FK-safe order).
-3. Delete all `teams` for the tournament.
-   Outcome: Returns tournament to “pre-team-build” state so `/build-teams` can run again.
-   */
+1. Require authorized tournament manager access.
+2. Load tournament and reject unless:
+   - mode == SOLO
+   - status == draft
+   - tournament not canceled
+   - tournament not finished
+3. Reject if tournament has already started.
+4. Delete dependent rows in safe order:
+   - `team_members`
+   - `team_state`
+   - `teams`
+5. Keep player rows and registrations intact.
+6. Return `{ ok:true }`.
+
+Outcome:
+Returns the SOLO setup phase to a pre-build state without losing accepted players or their strength settings.
+*/
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdminOr401 } from "@/lib/adminAuth";
+import { requireTournamentManagerOr401 } from "@/lib/adminAccess";
+import { sessionJson, unauthorized } from "@/lib/adminApi";
 import { getTournamentFlags } from "@/lib/tournamentGuards";
 
 export async function POST(
   _req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  if (!(await requireAdminOr401())) {
-    return NextResponse.json({ ok: false, error: "NOT_ADMIN" }, { status: 401 });
-  }
-
   const { id } = await context.params;
   const tournamentId = id;
+  const ctx = await requireTournamentManagerOr401(tournamentId);
+  if (!ctx) {
+    return unauthorized();
+  }
 
   const f = await getTournamentFlags(tournamentId);
   if (f.canceled) return NextResponse.json({ ok: false, error: "Tournament canceled" }, { status: 400 });

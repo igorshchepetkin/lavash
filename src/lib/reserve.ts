@@ -1,3 +1,41 @@
+// src/lib/reserve.ts
+/*
+Purpose:
+Reserve-roster business logic helpers.
+
+Responsibilities:
+1. Determine main-roster capacity by tournament mode:
+   - SOLO = 24
+   - TEAM = 8
+2. Decide whether an accepted registration should enter:
+   - main roster (`accepted`)
+   - reserve (`reserve`)
+3. Promote the oldest reserve registration when a main slot opens.
+4. Handle `reserve_pending` confirmation logic safely.
+
+Core business rules:
+- accepting within capacity -> `accepted`
+- accepting above capacity -> `reserve`
+- reserve registrations do not create players/teams until promotion
+- when a main slot opens, oldest reserve becomes `reserve_pending`
+- if confirmed while slot still free -> `accepted`
+- if slot already filled -> back to `reserve`
+- once tournament starts, promotion from reserve is no longer allowed
+
+Typical helper responsibilities:
+- getMainRosterCapacity(mode)
+- recalcReserveAfterUnaccept(...)
+- promoteOldestReserveIfPossible(...)
+- confirmReservePromotion(...)
+
+Design intent:
+Keep reserve-specific state transitions out of route handlers so the rules remain
+consistent across public and admin flows.
+
+Outcome:
+Provides a single source of truth for reserve capacity and promotion mechanics.
+*/
+
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
 
 export type RegistrationMode = "SOLO" | "TEAM";

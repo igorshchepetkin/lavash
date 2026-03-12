@@ -1,33 +1,49 @@
 // src/app/api/admin/tournament/[id]/points-overrides/route.ts
 /*
-Purpose: Manage per-stage point overrides (by court) before tournament start.
+Purpose:
+Read and replace stage-specific point overrides for a tournament.
+
 GET algorithm:
 
-1. Require admin.
-2. Fetch overrides for tournament ordered by `stage_number`.
-3. Return `{ ok:true, overrides:[{stage_number, points_c1..points_c4}] }`.
-   POST algorithm (replace-all synchronization):
-4. Require admin; block if tournament canceled or started.
-5. Parse `overrides` array from body and normalize numbers:
+1. Require authorized tournament manager access.
+2. Load all rows from `tournament_points_overrides` for the tournament,
+   ordered by `stage_number`.
+3. Return `{ ok:true, overrides }`.
 
-   * Keep only rows with finite stage_number>=1 and finite points_c1..c4.
-   * Attach `tournament_id`.
-6. Delete all existing overrides for the tournament (simple “reset then insert” policy).
-7. Insert normalized overrides if any remain.
-   Outcome: Provides a deterministic “single source of truth” override set, used by scoring endpoint to compute awarded points.
-   */
+POST algorithm:
+
+1. Require authorized tournament manager access.
+2. Reject if:
+   - tournament is canceled
+   - tournament is finished
+   - first match has already started
+3. Parse `overrides[]` from JSON body.
+4. Validate each row:
+   - stage_number >= 1
+   - no duplicate stage_number values
+   - points_c1..c4 are present
+5. Replace override set atomically:
+   - delete existing tournament overrides
+   - insert new rows
+6. Return `{ ok:true }`.
+
+Outcome:
+Supports pre-start configuration of special per-stage scoring rules.
+*/
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdminOr401 } from "@/lib/adminAuth";
+import { requireTournamentManagerOr401 } from "@/lib/adminAccess";
+import { sessionJson, unauthorized } from "@/lib/adminApi";
 import { getTournamentFlags } from "@/lib/tournamentGuards";
 
 export async function GET(_req: Request, context: { params: Promise<{ id: string }> }) {
-  if (!(await requireAdminOr401())) {
-    return NextResponse.json({ ok: false, error: "NOT_ADMIN" }, { status: 401 });
-  }
   const { id } = await context.params;
   const tournamentId = id;
+  const ctx = await requireTournamentManagerOr401(tournamentId);
+  if (!ctx) {
+    return unauthorized();
+  }
 
   const { data, error } = await supabaseAdmin
     .from("tournament_points_overrides")
@@ -40,11 +56,12 @@ export async function GET(_req: Request, context: { params: Promise<{ id: string
 }
 
 export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
-  if (!(await requireAdminOr401())) {
-    return NextResponse.json({ ok: false, error: "NOT_ADMIN" }, { status: 401 });
-  }
   const { id } = await context.params;
   const tournamentId = id;
+  const ctx = await requireTournamentManagerOr401(tournamentId);
+  if (!ctx) {
+    return unauthorized();
+  }
 
   const f = await getTournamentFlags(tournamentId);
   if (f.canceled) return NextResponse.json({ ok: false, error: "Tournament canceled" }, { status: 400 });

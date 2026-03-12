@@ -1,9 +1,162 @@
+// src/app/admin/t/[id]/ops/page.tsx
+/*
+Purpose:
+Operational match-management page for a tournament after setup.
+
+Page layout:
+Section 1 — Tournament header
+- tournament name
+- date / time
+- mode badge
+- status badge
+- chief judge
+- top-right buttons: ← Турниры / Обновить
+- tournament tabs
+
+Section 2 — Page actions
+- Build teams (SOLO)
+- Reset teams (SOLO)
+- Start next match
+- Finish tournament
+- Cancel tournament
+- Archive tournament (ADMIN only, terminal statuses only)
+
+Section 3 — Main content
+- SOLO players / seeding block (pre-build only)
+- current match courts grid
+
+Section 4 — Secondary content
+- team rating / standings
+
+Main responsibilities:
+1. Load operational tournament state:
+   - tournament
+   - teams
+   - latest stage
+   - current games
+   - SOLO player pre-build list
+2. Enforce lifecycle guards for starting/finishing/canceling.
+3. Provide result-entry UI for each court.
+4. Support SOLO-specific team build/reset/seeding workflow.
+5. Show current scoring and movement consequences via GameCard UI.
+
+State model:
+- before first match:
+  - SOLO strength/seeding editable
+  - teams may be built or reset
+  - points overrides are configured on the settings page, not here
+- during tournament:
+  - current stage shown
+  - results may be saved
+  - next stage may be started only when current one is complete
+- after finish:
+  - tournament becomes read-only operationally
+  - final standings emphasized
+- after cancel:
+  - match start button is hidden
+  - tournament remains operationally read-only
+
+Design intent:
+This page is the judge’s real-time console during tournament execution,
+so the primary actions must be prominent and fast.
+
+Outcome:
+Provides the live operational interface for tournament progression and result entry.
+*/
+
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
+import TournamentTabs from "@/components/TournamentTabs";
+import { adminFetch } from "@/lib/adminClient";
 
 type StatePayload = any;
+
+type SoloPlayerRow = {
+    id: string;
+    full_name: string;
+    strength: number;
+    seed_team_index: number | null;
+    seed_slot: number | null;
+    rank: number;
+    bucket: 1 | 2 | 3 | null;
+    team_index: number | null;
+    team_slot: number | null;
+};
+
+function statusBadge(status: string) {
+    switch (status) {
+        case "draft":
+            return {
+                text: "Приём заявок",
+                style: {
+                    backgroundColor: "#FFEDD5",
+                    color: "#C2410C",
+                    borderColor: "#FED7AA",
+                },
+            };
+        case "live":
+            return {
+                text: "Идёт",
+                style: {
+                    backgroundColor: "#E0F2FE",
+                    color: "#0369A1",
+                    borderColor: "#BAE6FD",
+                },
+            };
+        case "finished":
+            return {
+                text: "Завершён",
+                style: {
+                    backgroundColor: "#D1FAE5",
+                    color: "#047857",
+                    borderColor: "#A7F3D0",
+                },
+            };
+        case "canceled":
+            return {
+                text: "Отменён",
+                style: {
+                    backgroundColor: "#E2E8F0",
+                    color: "#475569",
+                    borderColor: "#CBD5E1",
+                },
+            };
+        default:
+            return {
+                text: status,
+                style: {
+                    backgroundColor: "#F1F5F9",
+                    color: "#475569",
+                    borderColor: "#E2E8F0",
+                },
+            };
+    }
+}
+
+function modeBadge(mode: "TEAM" | "SOLO") {
+    if (mode === "SOLO") {
+        return {
+            text: "SOLO",
+            style: {
+                backgroundColor: "#F5F3FF",
+                color: "#6D28D9",
+                borderColor: "#DDD6FE",
+            },
+        };
+    }
+
+    return {
+        text: "TEAM",
+        style: {
+            backgroundColor: "#FFF7ED",
+            color: "#C2410C",
+            borderColor: "#FED7AA",
+        },
+    };
+}
 
 export default function OpsPage() {
     const params = useParams<{ id: string }>();
@@ -14,41 +167,27 @@ export default function OpsPage() {
     const [msg, setMsg] = useState<string | null>(null);
 
     const [teamsBusy, setTeamsBusy] = useState(false);
-
     const [startingMatch, setStartingMatch] = useState(false);
-
-    type OverrideRow = { stage_number: number; points_c1: number; points_c2: number; points_c3: number; points_c4: number };
-
-    const [overrides, setOverrides] = useState<OverrideRow[]>([]);
-    const [ovBusy, setOvBusy] = useState(false);
-    const [ovMsg, setOvMsg] = useState<string | null>(null);
-
-    type SoloPlayerRow = {
-        id: string;
-        full_name: string;
-        strength: number;
-        seed_team_index: number | null;
-        seed_slot: number | null;
-        rank: number;
-        bucket: 1 | 2 | 3 | null;
-        team_index: number | null;
-        team_slot: number | null;
-    };
 
     const [soloPlayers, setSoloPlayers] = useState<SoloPlayerRow[]>([]);
     const [spBusyId, setSpBusyId] = useState<string | null>(null);
     const [spMsg, setSpMsg] = useState<string | null>(null);
 
+    const [loaded, setLoaded] = useState(false);
+    const [me, setMe] = useState<any | null>(null);
+
     async function load() {
-        const res = await fetch(`/api/admin/tournament/${tournamentId}/state`);
+        const [res, resMe] = await Promise.all([
+            fetch(`/api/admin/tournament/${tournamentId}/state`),
+            fetch(`/api/admin/auth/me`, { cache: "no-store" }),
+        ]);
+
         const json = await res.json();
+        const jsonMe = await resMe.json().catch(() => ({}));
+
         setState(json);
+        setMe(jsonMe?.user ?? null);
 
-        const resO = await fetch(`/api/admin/tournament/${tournamentId}/points-overrides`);
-        const jsonO = await resO.json();
-        setOverrides(jsonO.overrides ?? []);
-
-        // SOLO players list (for seeding UI)
         const resP = await fetch(`/api/admin/tournament/${tournamentId}/solo-players`);
         const jsonP = await resP.json();
         if (!resP.ok || !jsonP?.ok) {
@@ -57,6 +196,8 @@ export default function OpsPage() {
         } else {
             setSoloPlayers(jsonP.players ?? []);
         }
+
+        setLoaded(true);
     }
 
     useEffect(() => {
@@ -77,33 +218,12 @@ export default function OpsPage() {
 
     const stageHasGames = (games?.length ?? 0) > 0;
     const stageComplete = stageHasGames && games.every((g: any) => !!g.winner_team_id);
-    const canEditOverrides = !canceled && !finished && latestNum === 0; // ещё нет матчей
 
-    // Можно стартовать следующий матч если:
-    // - турнир не отменён/не завершён
-    // - либо матчей ещё не было (latestNum == 0)
-    // - либо предыдущий матч завершён (все 4 результата внесены)
-    const canStartNext =
-        !canceled &&
-        !finished &&
-        (latestNum === 0 || stageComplete);
-
-    const canFinish =
-        !canceled && !finished && latestNum > 0 && stageComplete;
+    const canStartNext = !canceled && !finished && (latestNum === 0 || stageComplete);
+    const canFinish = !canceled && !finished && latestNum > 0 && stageComplete;
 
     const nameById = useMemo(() => new Map(teams.map((x: any) => [x.id, x.name])), [teams]);
-
     const teamsBuilt = (teams?.length ?? 0) > 0;
-
-    const overridesHasErrors = (() => {
-        const sn = overrides.map(o => o.stage_number);
-        if (new Set(sn).size !== sn.length) return true;
-        for (const o of overrides) {
-            if (!Number.isFinite(o.stage_number) || o.stage_number < 1) return true;
-        }
-        return false;
-    })();
-    const canSaveOverrides = overrides.length > 0 && !overridesHasErrors;
 
     function pointsForCourt(court: number) {
         if (!t) return null;
@@ -118,7 +238,7 @@ export default function OpsPage() {
         setSpBusyId(playerId);
         setSpMsg(null);
         try {
-            const res = await fetch(`/api/admin/tournament/${tournamentId}/solo-players/seed`, {
+            const res = await adminFetch(`/api/admin/tournament/${tournamentId}/solo-players/seed`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ playerId, seed_team_index }),
@@ -139,7 +259,7 @@ export default function OpsPage() {
         setBusy(true);
         setMsg(null);
         try {
-            const res = await fetch(`/api/admin/tournament/${tournamentId}/build-teams`, {
+            const res = await adminFetch(`/api/admin/tournament/${tournamentId}/build-teams`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ seeds: [] }),
@@ -169,7 +289,7 @@ export default function OpsPage() {
         setBusy(true);
         setMsg(null);
         try {
-            const res = await fetch(`/api/admin/tournament/${tournamentId}/reset-teams`, {
+            const res = await adminFetch(`/api/admin/tournament/${tournamentId}/reset-teams`, {
                 method: "POST",
             });
 
@@ -188,11 +308,12 @@ export default function OpsPage() {
     }
 
     async function start() {
-        setBusy(true); setMsg(null);
+        setBusy(true);
+        setMsg(null);
         setStartingMatch(true);
 
         try {
-            const res = await fetch(`/api/admin/tournament/${tournamentId}/start`, {
+            const res = await adminFetch(`/api/admin/tournament/${tournamentId}/start`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ seededPairs: [] }),
@@ -213,9 +334,10 @@ export default function OpsPage() {
         );
         if (!ok) return;
 
-        setBusy(true); setMsg(null);
+        setBusy(true);
+        setMsg(null);
         try {
-            const res = await fetch(`/api/admin/tournament/${tournamentId}/cancel`, { method: "POST" });
+            const res = await adminFetch(`/api/admin/tournament/${tournamentId}/cancel`, { method: "POST" });
             const json = await res.json();
             if (!res.ok) setMsg(json?.error ?? "Ошибка");
             else setMsg("Турнир отменён.");
@@ -226,9 +348,10 @@ export default function OpsPage() {
     }
 
     async function submitResult(gameId: string, winnerTeamId: string, scoreText: string): Promise<boolean> {
-        setBusy(true); setMsg(null);
+        setBusy(true);
+        setMsg(null);
         try {
-            const res = await fetch(`/api/admin/tournament/${tournamentId}/game/result`, {
+            const res = await adminFetch(`/api/admin/tournament/${tournamentId}/game/result`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ gameId, winnerTeamId, scoreText }),
@@ -253,7 +376,7 @@ export default function OpsPage() {
 
         setBusy(true);
         try {
-            const res = await fetch(`/api/admin/tournament/${tournamentId}/finish`, { method: "POST" });
+            const res = await adminFetch(`/api/admin/tournament/${tournamentId}/finish`, { method: "POST" });
             const json = await res.json();
             if (!res.ok) setMsg(json?.error ?? "Ошибка завершения");
             await load();
@@ -262,231 +385,196 @@ export default function OpsPage() {
         }
     }
 
-    function addOverrideRow() {
-        const used = new Set(overrides.map((o) => o.stage_number));
-        let sn = 1;
-        while (used.has(sn)) sn++;
-        setOverrides((prev) => [...prev, { stage_number: sn, points_c1: 1, points_c2: 1, points_c3: 1, points_c4: 1 }]);
-    }
+    async function archiveTournament() {
+        const ok = window.confirm(
+            "Архивировать турнир?\n\nПосле этого он исчезнет из списка активных турниров и попадёт в архив."
+        );
+        if (!ok) return;
 
-    function updateOverrideRow(idx: number, patch: Partial<OverrideRow>) {
-        setOverrides((prev) => prev.map((r, i) => (i === idx ? { ...r, ...patch } : r)));
-    }
-
-    function removeOverrideRow(idx: number) {
-        setOverrides((prev) => prev.filter((_, i) => i !== idx));
-    }
-
-    async function saveOverrides() {
-        setOvBusy(true); setOvMsg(null);
+        setBusy(true);
+        setMsg(null);
         try {
-            // простая валидация дублей
-            const sn = overrides.map(o => o.stage_number);
-            if (new Set(sn).size !== sn.length) {
-                setOvMsg("Дублируется номер матча в особых условиях.");
-                return;
-            }
-
-            const res = await fetch(`/api/admin/tournament/${tournamentId}/points-overrides`, {
+            const res = await adminFetch(`/api/admin/tournament/${tournamentId}/archive`, {
                 method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ overrides }),
             });
-
             const json = await res.json().catch(() => ({}));
             if (!res.ok) {
-                setOvMsg(json?.error?.message ?? json?.error ?? "Ошибка сохранения условий");
+                setMsg(json?.error ?? "Ошибка архивирования");
                 return;
             }
-
-            setOvMsg("Особые условия сохранены.");
+            setMsg("Турнир архивирован.");
             await load();
         } finally {
-            setOvBusy(false);
+            setBusy(false);
         }
     }
 
+    if (!loaded) {
+        return (
+            <main className="space-y-6">
+                <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    Загрузка...
+                </section>
+            </main>
+        );
+    }
+
+    const st = statusBadge(t?.status ?? "draft");
+    const md = modeBadge((t?.registration_mode ?? "SOLO") as "TEAM" | "SOLO");
+
     return (
-        <main className="min-h-screen bg-white">
-            <div className="mx-auto max-w-5xl px-4 py-8">
-                <div className="flex items-center justify-between">
-                    <h1 className="text-2xl font-extrabold tracking-tight">Судья</h1>
-                    <div className="flex gap-2">
-                        <a className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50" href="/admin">
+        <main className="space-y-6">
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-wrap items-start justify-between gap-4">
+                    <div className="min-w-0">
+                        <h1 className="text-2xl font-extrabold text-slate-900">{t?.name ?? "Турнир"}</h1>
+
+                        <div className="mt-4 rounded-2xl border border-slate-200 px-4 py-3">
+                            <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                                <span>
+                                    {t?.date}
+                                    {t?.start_time ? ` · ${t.start_time}` : ""}
+                                </span>
+
+                                <span
+                                    className="inline-flex rounded-full border px-2 py-1 text-xs font-bold"
+                                    style={md.style}
+                                >
+                                    {md.text}
+                                </span>
+
+                                <span
+                                    className="inline-flex rounded-full border px-2 py-1 text-xs font-bold"
+                                    style={st.style}
+                                >
+                                    {st.text}
+                                </span>
+
+                                <span className="text-slate-400">•</span>
+
+                                <span className="text-sm text-slate-700">
+                                    Главный судья:{" "}
+                                    <span className="font-semibold text-slate-900">
+                                        {t?.chief_judge_name || "—"}
+                                    </span>
+                                </span>
+                            </div>
+                        </div>
+
+                        <div className="mt-2">
+                            <TournamentTabs tournamentId={tournamentId} />
+                        </div>
+                    </div>
+
+                    <div className="flex flex-wrap gap-2">
+                        <Link
+                            href="/admin/tournaments"
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50"
+                        >
                             ← Турниры
-                        </a>
-                        <button className="rounded-xl bg-orange-600 px-3 py-2 text-sm font-bold text-white hover:bg-orange-700" onClick={load}>
+                        </Link>
+
+                        <button
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50"
+                            onClick={load}
+                            type="button"
+                        >
                             Обновить
                         </button>
                     </div>
                 </div>
+            </section>
 
-                <section className="mt-6 rounded-2xl border border-slate-200 p-5">
-                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                            <div className="text-lg font-extrabold">{t?.name}</div>
-                            <div className="text-sm text-slate-600">
-                                {t?.date} · режим: <b className="text-orange-600">{t?.registration_mode}</b> · статус:{" "}
-                                <b className="text-orange-600">{t?.status}</b>
-                            </div>
-                        </div>
-
-                        <div className="flex flex-wrap gap-2">
-                            {t?.registration_mode === "SOLO" && !canceled && !finished && latestNum === 0 ? (
-                                teamsBuilt ? (
-                                    <button
-                                        disabled={teamsBusy || busy || startingMatch}
-                                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-2"
-                                        onClick={resetTeams}
-                                        title="Удалить команды и распределение игроков"
-                                    >
-                                        {teamsBusy ? <Spinner className="h-4 w-4 border-red-300 border-t-red-700" /> : null}
-                                        {teamsBusy ? "Сброс..." : "Сбросить команды"}
-                                    </button>
-                                ) : (
-                                    <button
-                                        disabled={teamsBusy || busy || startingMatch}
-                                        className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50 inline-flex items-center gap-2"
-                                        onClick={buildTeamsSolo}
-                                        title="Собрать команды по корзинам"
-                                    >
-                                        {teamsBusy ? <Spinner className="h-4 w-4" /> : null}
-                                        {teamsBusy ? "Сбор..." : "Собрать команды"}
-                                    </button>
-                                )
-                            ) : null}
-
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="flex flex-wrap gap-2">
+                    {t?.registration_mode === "SOLO" && !canceled && !finished && latestNum === 0 ? (
+                        teamsBuilt ? (
                             <button
-                                disabled={busy || !canStartNext}
-                                className="rounded-xl bg-orange-600 px-3 py-2 text-sm font-bold text-white hover:bg-orange-700 disabled:opacity-50"
-                                onClick={start}
-                                title={!canStartNext ? "Чтобы стартовать следующий матч, сохрани результаты всех игр" : ""}
+                                disabled={teamsBusy || busy || startingMatch}
+                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
+                                onClick={resetTeams}
+                                title="Удалить команды и распределение игроков"
+                                type="button"
                             >
-                                {startingMatch ? <Spinner className="h-4 w-4 border-white/40 border-t-white" /> : null}
-                                {!canStartNext ? "Матч №" + latestNum + " в процессе..." : (startingMatch ? "Запуск матча..." : "Стартовать Матч №" + nextMatchNumber)}
+                                {teamsBusy ? <Spinner className="h-4 w-4 border-red-300 border-t-red-700" /> : null}
+                                {teamsBusy ? "Сброс..." : "Сбросить команды"}
                             </button>
-
-                            {!finished && latestNum > 0 ? (
-                                <button
-                                    disabled={busy || !canFinish}
-                                    className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-100 disabled:opacity-50"
-                                    onClick={finishTournament}
-                                    title={!canFinish ? "Можно завершить только после внесения результатов всех игр текущего матча" : ""}
-                                >
-                                    Завершить турнир
-                                </button>
-                            ) : []}
-
-                            <button
-                                disabled={busy || canceled || finished}
-                                className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
-                                onClick={cancelTournament}
-                            >
-                                Отменить турнир
-                            </button>
-                        </div>
-                    </div>
-
-                    {msg && <div className="mt-3 text-sm font-semibold text-orange-700">{msg}</div>}
-                </section>
-
-                {canEditOverrides && (
-                    <section className="mt-6 rounded-2xl border border-slate-200 p-5">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div>
-                                <h2 className="text-lg font-bold">Особые очки по матчам</h2>
-                                <div className="text-xs text-slate-500">
-                                    Можно задать другие очки для отдельных матчей. Например, для первого матча всем по 1 очку.
-                                </div>
-                            </div>
-
-                            <div className="flex gap-2">
-                                <button
-                                    disabled={ovBusy}
-                                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
-                                    onClick={addOverrideRow}
-                                >
-                                    + Добавить матч
-                                </button>
-
-                                <button
-                                    disabled={ovBusy || !canSaveOverrides}
-                                    className="rounded-xl bg-orange-600 px-3 py-2 text-sm font-bold text-white hover:bg-orange-700 disabled:opacity-50"
-                                    onClick={saveOverrides}
-                                >
-                                    {ovBusy ? "Сохраняю..." : "Сохранить"}
-                                </button>
-                            </div>
-                        </div>
-
-                        {ovMsg && <div className="mt-3 text-sm font-semibold text-orange-700">{ovMsg}</div>}
-
-                        {overrides.length === 0 ? (
-                            <div className="mt-4 text-sm text-slate-600">Пока нет особых условий.</div>
                         ) : (
-                            <div className="mt-4 grid gap-2">
-                                {overrides.map((row, idx) => {
-                                    const dup = overrides.filter((o) => o.stage_number === row.stage_number).length > 1;
-                                    const badSn = !Number.isFinite(row.stage_number) || row.stage_number < 1;
+                            <button
+                                disabled={teamsBusy || busy || startingMatch}
+                                className="inline-flex items-center gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
+                                onClick={buildTeamsSolo}
+                                title="Собрать команды по корзинам"
+                                type="button"
+                            >
+                                {teamsBusy ? <Spinner className="h-4 w-4" /> : null}
+                                {teamsBusy ? "Сбор..." : "Собрать команды"}
+                            </button>
+                        )
+                    ) : null}
 
-                                    return (
-                                        <div key={idx} className="rounded-2xl border border-slate-100 p-4">
-                                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                                                <div className="flex flex-wrap items-center gap-2">
-                                                    <div className="text-sm font-bold">Матч №</div>
-                                                    <input
-                                                        type="number"
-                                                        min={1}
-                                                        className={"w-24 rounded-xl border px-3 py-2 text-sm " + ((dup || badSn) ? "border-red-300" : "border-slate-200")}
-                                                        value={row.stage_number}
-                                                        onChange={(e) => updateOverrideRow(idx, { stage_number: Number(e.target.value) })}
-                                                    />
-                                                    {(dup || badSn) ? (
-                                                        <div className="text-xs font-semibold text-red-600">
-                                                            {badSn ? "Номер матча должен быть ≥ 1" : "Дублируется номер матча"}
-                                                        </div>
-                                                    ) : null}
-                                                </div>
+                    {!canceled ? (
+                        <button
+                            disabled={busy || !canStartNext}
+                            className="rounded-xl bg-orange-600 px-3 py-2 text-sm font-bold text-white hover:bg-orange-700 disabled:opacity-50"
+                            onClick={start}
+                            title={!canStartNext ? "Чтобы стартовать следующий матч, сохрани результаты всех игр" : ""}
+                            type="button"
+                        >
+                            {startingMatch ? (
+                                <Spinner className="h-4 w-4 border-white/40 border-t-white" />
+                            ) : null}
+                            {!canStartNext
+                                ? "Матч №" + latestNum + " в процессе..."
+                                : startingMatch
+                                    ? "Запуск матча..."
+                                    : "Стартовать Матч №" + nextMatchNumber}
+                        </button>
+                    ) : null}
 
-                                                <button
-                                                    disabled={ovBusy}
-                                                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50 disabled:opacity-50"
-                                                    onClick={() => removeOverrideRow(idx)}
-                                                >
-                                                    Удалить
-                                                </button>
-                                            </div>
+                    {!finished && latestNum > 0 ? (
+                        <button
+                            disabled={busy || !canFinish}
+                            className="rounded-xl border border-orange-200 bg-orange-50 px-3 py-2 text-sm font-semibold text-orange-700 hover:bg-orange-100 disabled:opacity-50"
+                            onClick={finishTournament}
+                            title={!canFinish ? "Можно завершить только после внесения результатов всех игр текущего матча" : ""}
+                            type="button"
+                        >
+                            Завершить турнир
+                        </button>
+                    ) : null}
 
-                                            <div className="mt-3">
-                                                <div className="text-xs font-semibold text-slate-600">Очки за корты (c1..c4)</div>
-                                                <div className="mt-1 grid grid-cols-4 gap-2">
-                                                    {[row.points_c1, row.points_c2, row.points_c3, row.points_c4].map((v, i) => (
-                                                        <input
-                                                            key={i}
-                                                            type="number"
-                                                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm"
-                                                            value={v}
-                                                            onChange={(e) => {
-                                                                const n = Number(e.target.value);
-                                                                if (i === 0) updateOverrideRow(idx, { points_c1: n });
-                                                                if (i === 1) updateOverrideRow(idx, { points_c2: n });
-                                                                if (i === 2) updateOverrideRow(idx, { points_c3: n });
-                                                                if (i === 3) updateOverrideRow(idx, { points_c4: n });
-                                                            }}
-                                                        />
-                                                    ))}
-                                                </div>
-                                            </div>
-                                        </div>
-                                    );
-                                })}
-                            </div>
-                        )}
-                    </section>
-                )}
+                    {!canceled ? (
+                        <button
+                            disabled={busy || canceled || finished}
+                            className="rounded-xl border border-red-200 bg-red-50 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-100 disabled:opacity-50"
+                            onClick={cancelTournament}
+                            type="button"
+                        >
+                            Отменить турнир
+                        </button>
+                    ) : null}
+
+                    {me?.roles?.includes("ADMIN") && (finished || canceled) && !t?.archived_at ? (
+                        <button
+                            disabled={busy}
+                            className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:opacity-50"
+                            onClick={archiveTournament}
+                            type="button"
+                        >
+                            Архивировать
+                        </button>
+                    ) : null}
+                </div>
+
+                {msg && <div className="mt-3 text-sm font-semibold text-orange-700">{msg}</div>}
+            </section>
+
+            <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="font-semibold text-slate-700">Матчи и сетка турнира</div>
 
                 {t?.registration_mode === "SOLO" && latestNum === 0 && !canceled && !finished ? (
-                    <section className="mt-6 rounded-2xl border border-slate-200 p-5">
+                    <div className="mt-5 rounded-2xl border border-slate-200 p-5">
                         <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                             <div>
                                 <h2 className="text-lg font-bold">Игроки (посев и корзины)</h2>
@@ -547,11 +635,14 @@ export default function OpsPage() {
                                                                 setSpBusyId(p.id);
                                                                 setSpMsg(null);
                                                                 try {
-                                                                    const res = await fetch(`/api/admin/tournament/${tournamentId}/players/strength`, {
-                                                                        method: "POST",
-                                                                        headers: { "Content-Type": "application/json" },
-                                                                        body: JSON.stringify({ playerId: p.id, strength: v }),
-                                                                    });
+                                                                    const res = await adminFetch(
+                                                                        `/api/admin/tournament/${tournamentId}/players/strength`,
+                                                                        {
+                                                                            method: "POST",
+                                                                            headers: { "Content-Type": "application/json" },
+                                                                            body: JSON.stringify({ playerId: p.id, strength: v }),
+                                                                        }
+                                                                    );
                                                                     const json = await res.json().catch(() => ({}));
                                                                     if (!res.ok) {
                                                                         setSpMsg(json?.error?.message ?? json?.error ?? "Ошибка изменения уровня");
@@ -563,7 +654,11 @@ export default function OpsPage() {
                                                                 }
                                                             }}
                                                         >
-                                                            {[1, 2, 3, 4, 5].map(x => <option key={x} value={x}>{x}</option>)}
+                                                            {[1, 2, 3, 4, 5].map((x) => (
+                                                                <option key={x} value={x}>
+                                                                    {x}
+                                                                </option>
+                                                            ))}
                                                         </select>
                                                     </td>
 
@@ -579,7 +674,7 @@ export default function OpsPage() {
                                                             title="Посеять игрока в команду (1..8)"
                                                         >
                                                             <option value="">—</option>
-                                                            {[1, 2, 3, 4, 5, 6, 7, 8].map(n => (
+                                                            {[1, 2, 3, 4, 5, 6, 7, 8].map((n) => (
                                                                 <option key={n} value={n}>
                                                                     Команда {n}
                                                                 </option>
@@ -607,81 +702,75 @@ export default function OpsPage() {
                                 </div>
                             )}
                         </div>
-                    </section>
+                    </div>
                 ) : null}
 
                 {!finished ? (
-                    <section className="mt-6 rounded-2xl border border-slate-200 p-5">
-                        <div className="flex items-center justify-between">
+                    <div className="mt-5">
+                        <div className="mb-3 flex items-center justify-between">
                             <h2 className="text-lg font-bold">Текущий матч</h2>
 
                             <div className="text-sm text-slate-600">
-                                {state?.latestStage?.number
-                                    ? `Матч №${state.latestStage.number}`
-                                    : "нет"}
+                                {state?.latestStage?.number ? `Матч №${state.latestStage.number}` : "нет"}
                             </div>
                         </div>
 
-                        <div className="mt-4">
-                            {startingMatch ? (
-                                <div className="rounded-2xl border border-slate-100 bg-slate-50 p-6">
-                                    <div className="flex items-center gap-3">
-                                        <Spinner className="h-5 w-5" />
-                                        <div className="text-sm font-extrabold text-slate-700">Выполняется старт матча…</div>
-                                    </div>
-                                    <div className="mt-2 text-xs text-slate-500">
-                                        Создаются игры и обновляется состояние турнира. Это займёт несколько секунд.
+                        {startingMatch ? (
+                            <div className="rounded-2xl border border-slate-100 bg-slate-50 p-6">
+                                <div className="flex items-center gap-3">
+                                    <Spinner className="h-5 w-5" />
+                                    <div className="text-sm font-extrabold text-slate-700">
+                                        Выполняется старт матча…
                                     </div>
                                 </div>
-                            ) : (
-                                <div className="grid gap-3 sm:grid-cols-2">
-                                    {[1, 2, 3, 4].map((court) => {
-                                        const g = games.find((x: any) => x.court === court);
-                                        if (!g) {
-                                            return (
-                                                <div key={court} className="rounded-2xl border border-slate-100 p-4">
-                                                    <div className="font-bold">Корт {court}</div>
-                                                    <div className="mt-2 text-sm text-slate-600">Пока нет игры</div>
-                                                </div>
-                                            );
-                                        }
-
-                                        const a = nameById.get(g.team_a_id);
-                                        const b = nameById.get(g.team_b_id);
-                                        const done = !!g.winner_team_id;
-
+                                <div className="mt-2 text-xs text-slate-500">
+                                    Создаются игры и обновляется состояние турнира. Это займёт несколько секунд.
+                                </div>
+                            </div>
+                        ) : (
+                            <div className="grid gap-3 sm:grid-cols-2">
+                                {[1, 2, 3, 4].map((court) => {
+                                    const g = games.find((x: any) => x.court === court);
+                                    if (!g) {
                                         return (
-                                            <GameCard
-                                                key={g.id}
-                                                court={court}
-                                                points={pointsForCourt(court)}
-                                                teamA={{ id: g.team_a_id, name: typeof a === "string" ? a : "—" }}
-                                                teamB={{ id: g.team_b_id, name: typeof b === "string" ? b : "—" }}
-                                                done={done}
-                                                existingWinner={g.winner_team_id}
-                                                existingScore={g.score_text ?? ""}
-                                                onSubmit={async (winnerId, score) => {
-                                                    const ok = await submitResult(g.id, winnerId, score);
-                                                    return ok;
-                                                }}
-                                                busy={busy}
-                                                isFinal={g.is_final}
-                                            />
+                                            <div key={court} className="rounded-2xl border border-slate-100 p-4">
+                                                <div className="font-bold">Корт {court}</div>
+                                                <div className="mt-2 text-sm text-slate-600">Пока нет игры</div>
+                                            </div>
                                         );
-                                    })}
-                                </div>
-                            )}
-                        </div>
-                    </section>
-                ) : (
-                    <section className="mt-6 rounded-2xl border border-orange-200 bg-orange-50 p-5">
-                        <div className="flex items-center justify-between">
-                            <h2 className="text-lg font-extrabold text-orange-700">
-                                Итоги турнира
-                            </h2>
-                            <div className="text-sm font-extrabold text-orange-700">
-                                Турнир завершён
+                                    }
+
+                                    const a = nameById.get(g.team_a_id);
+                                    const b = nameById.get(g.team_b_id);
+                                    const done = !!g.winner_team_id;
+
+                                    return (
+                                        <GameCard
+                                            key={g.id}
+                                            court={court}
+                                            points={pointsForCourt(court)}
+                                            teamA={{ id: g.team_a_id, name: typeof a === "string" ? a : "—" }}
+                                            teamB={{ id: g.team_b_id, name: typeof b === "string" ? b : "—" }}
+                                            done={done}
+                                            existingWinner={g.winner_team_id}
+                                            existingScore={g.score_text ?? ""}
+                                            onSubmit={async (winnerId, score) => {
+                                                const ok = await submitResult(g.id, winnerId, score);
+                                                return ok;
+                                            }}
+                                            busy={busy}
+                                            isFinal={g.is_final}
+                                        />
+                                    );
+                                })}
                             </div>
+                        )}
+                    </div>
+                ) : (
+                    <div className="mt-5 rounded-2xl border border-orange-200 bg-orange-50 p-5">
+                        <div className="flex items-center justify-between">
+                            <h2 className="text-lg font-extrabold text-orange-700">Итоги турнира</h2>
+                            <div className="text-sm font-extrabold text-orange-700">Турнир завершён</div>
                         </div>
 
                         <div className="mt-4 grid gap-2">
@@ -691,43 +780,37 @@ export default function OpsPage() {
                                     className="flex items-center justify-between rounded-xl border border-orange-100 bg-white px-4 py-3"
                                 >
                                     <div className="text-sm font-bold">
-                                        <span className="mr-3 text-lg font-extrabold text-orange-600">
-                                            {idx + 1}
-                                        </span>
+                                        <span className="mr-3 text-lg font-extrabold text-orange-600">{idx + 1}</span>
                                         {tm.name}
                                     </div>
 
-                                    <div className="text-base font-extrabold text-orange-700">
-                                        {tm.points} очк.
-                                    </div>
+                                    <div className="text-base font-extrabold text-orange-700">{tm.points} очк.</div>
                                 </div>
                             ))}
                         </div>
-                    </section>
+                    </div>
                 )}
+            </section>
 
-                {!finished && (
-                    <section className="mt-6 rounded-2xl border border-slate-200 p-5">
-                        <h2 className="text-lg font-bold">Команды (очки)</h2>
-                        <div className="mt-3 grid gap-2">
-                            {teams.map((tm: any, idx: number) => (
-                                <div
-                                    key={tm.id}
-                                    className="flex items-center justify-between rounded-xl border border-slate-100 px-3 py-2"
-                                >
-                                    <div className="text-sm font-semibold">
-                                        <span className="mr-2 font-extrabold text-orange-600">
-                                            {idx + 1}
-                                        </span>
-                                        {tm.name}
-                                    </div>
-                                    <div className="text-sm font-bold">{tm.points}</div>
+            {!finished && (
+                <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                    <h2 className="text-lg font-bold">Рейтинг команд</h2>
+                    <div className="mt-3 grid gap-2">
+                        {teams.map((tm: any, idx: number) => (
+                            <div
+                                key={tm.id}
+                                className="flex items-center justify-between rounded-xl border border-slate-100 px-3 py-2"
+                            >
+                                <div className="text-sm font-semibold">
+                                    <span className="mr-2 font-extrabold text-orange-600">{idx + 1}</span>
+                                    {tm.name}
                                 </div>
-                            ))}
-                        </div>
-                    </section>
-                )}
-            </div>
+                                <div className="text-sm font-bold">{tm.points}</div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+            )}
         </main>
     );
 }
@@ -801,17 +884,14 @@ function GameCard(props: {
     return (
         <div
             className={
-                "rounded-2xl border p-4 " +
-                (props.done ? "border-orange-200" : "border-slate-100")
+                "rounded-2xl border p-4 " + (props.done ? "border-orange-200" : "border-slate-100")
             }
         >
             <div className="flex items-center justify-between">
                 <div className="font-extrabold">
                     Корт {props.court}
                     {props.points != null ? (
-                        <span className="ml-2 text-xs font-bold text-slate-500">
-                            Очки: +{props.points}
-                        </span>
+                        <span className="ml-2 text-xs font-bold text-slate-500">Очки: +{props.points}</span>
                     ) : null}
                 </div>
                 {props.done ? (
@@ -847,15 +927,11 @@ function GameCard(props: {
                                     {props.teamA.name}
                                 </div>
                             </div>
-                            <div className="shrink-0 pt-0.5">
-                                {props.done ? moveBadge(props.teamA.id) : null}
-                            </div>
+                            <div className="shrink-0 pt-0.5">{props.done ? moveBadge(props.teamA.id) : null}</div>
                         </div>
                     </button>
 
-                    <div className="text-xs font-extrabold tracking-widest text-slate-400">
-                        VS
-                    </div>
+                    <div className="text-xs font-extrabold tracking-widest text-slate-400">VS</div>
 
                     <button
                         type="button"
@@ -875,9 +951,7 @@ function GameCard(props: {
                                     {props.teamB.name}
                                 </div>
                             </div>
-                            <div className="shrink-0 pt-0.5">
-                                {props.done ? moveBadge(props.teamB.id) : null}
-                            </div>
+                            <div className="shrink-0 pt-0.5">{props.done ? moveBadge(props.teamB.id) : null}</div>
                         </div>
                     </button>
                 </div>
@@ -896,7 +970,7 @@ function GameCard(props: {
                         <Spinner />
                         Сохранение…
                     </div>
-                ) : (props.done || savedToast) ? (
+                ) : props.done || savedToast ? (
                     <div className="mt-2 flex items-center justify-center rounded-xl border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-bold text-gray-500">
                         Результат сохранён
                     </div>
@@ -913,6 +987,7 @@ function GameCard(props: {
                                 setSaving(false);
                             }
                         }}
+                        type="button"
                     >
                         Сохранить результат
                     </button>

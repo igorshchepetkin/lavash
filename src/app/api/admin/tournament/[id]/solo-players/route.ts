@@ -1,25 +1,32 @@
 // src/app/api/admin/tournament/[id]/solo-players/route.ts
 /*
-Purpose: Provide admin UI with a deterministic ranked list of SOLO players, enriched with bucket and team placement info.
+Purpose:
+Return the pre-build SOLO player list used for bucket visualization, seeding, and manual review.
+
 Algorithm:
 
-1. Require admin.
-2. Load all players for tournament with strength + seed fields. If none -> return empty.
-3. Deterministic ordering: normalize strength [1..5], sort by strength desc, then FNV-1a hash `(id + tournamentId)` asc, then id asc.
-4. Derive rank (1..N) and bucket assignment by index:
+1. Require authorized tournament manager access.
+2. Load all eligible SOLO players for this tournament.
+3. Build the deterministic ranking order:
+   - strength DESC
+   - stable hash(player.id + tournamentId)
+   - id ASC
+4. Derive per-player metadata:
+   - rank
+   - bucket (A/B/C or 1/2/3)
+   - current team assignment if teams already exist
+   - team_index and team_slot if assigned
+   - seed_team_index / seed_slot if present
+5. Return `{ ok:true, players }`.
 
-   * 1..8 -> bucket 1, 9..16 -> bucket 2, rest -> bucket 3.
-5. If teams already exist:
-
-   * Load teams ordered by created_at; map team_id -> team_index (1..8).
-   * Load team_members for those teams; map player_id -> team_index and team_slot.
-6. Return players array with: id, full_name, strength, seed fields, rank, bucket, and optional team_index/team_slot (if teams built).
-   Outcome: A stable, reproducible view that matches the team-building bucket logic and helps admins seed specific players into teams.
-   */
+Outcome:
+Feeds the SOLO pre-build management grid with stable bucket and seeding information.
+*/
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdminOr401 } from "@/lib/adminAuth";
+import { requireTournamentManagerOr401 } from "@/lib/adminAccess";
+import { sessionJson, unauthorized } from "@/lib/adminApi";
 
 function clampInt(v: any, lo: number, hi: number) {
   const n = Number(v);
@@ -69,12 +76,12 @@ export async function GET(
   _req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  if (!(await requireAdminOr401())) {
-    return NextResponse.json({ ok: false, error: "NOT_ADMIN" }, { status: 401 });
-  }
-
   const { id } = await context.params;
   const tournamentId = id;
+  const ctx = await requireTournamentManagerOr401(tournamentId);
+  if (!ctx) {
+    return unauthorized();
+  }
 
   // 1) players
   const { data: playersRaw, error: eP } = await supabaseAdmin

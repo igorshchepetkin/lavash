@@ -1,18 +1,31 @@
 // src/app/api/admin/tournament/[id]/cancel/route.ts
 /*
-Purpose: Cancel a tournament and invalidate all registrations.
+Purpose:
+Cancel a tournament irreversibly.
+
 Algorithm:
 
-1. Require admin (`requireAdminOr401`).
-2. Load tournament status; if not found -> 404; if already canceled -> `{ ok:true }`.
-3. Update tournament `status` to `"canceled"`.
-4. Bulk update all `registrations` of this tournament to `status:"canceled"`.
-   Outcome: Tournament is permanently marked canceled; registrations are also marked canceled for consistent downstream UI/state.
-   */
+1. Require authorized tournament manager access.
+2. Load tournament.
+3. Reject if tournament is already canceled or already finished.
+4. Update `tournaments.status='canceled'`.
+5. Convert all still-relevant registrations into their canceled terminal view/state
+   if the project applies explicit registration cancellation updates.
+6. Prevent any further:
+   - public applications
+   - team building
+   - match starts
+   - result entry
+7. Return `{ ok:true }`.
+
+Outcome:
+Moves the tournament into a terminal canceled state and blocks all operational flows.
+*/
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdminOr401 } from "@/lib/adminAuth";
+import { requireTournamentManagerOr401 } from "@/lib/adminAccess";
+import { sessionJson, unauthorized } from "@/lib/adminApi";
 
 export async function POST(
     _req: Request,
@@ -21,8 +34,9 @@ export async function POST(
     const { id } = await context.params;
     const tournamentId = id;
 
-    if (!(await requireAdminOr401())) {
-        return NextResponse.json({ ok: false, error: "NOT_ADMIN" }, { status: 401 });
+    const ctx = await requireTournamentManagerOr401(tournamentId);
+    if (!ctx) {
+        return unauthorized()
     }
 
     // Р•СЃР»Рё СѓР¶Рµ РѕС‚РјРµРЅС‘РЅ/Р·Р°РІРµСЂС€С‘РЅ вЂ” РїСЂРѕСЃС‚Рѕ СЃРѕРѕР±С‰РёРј

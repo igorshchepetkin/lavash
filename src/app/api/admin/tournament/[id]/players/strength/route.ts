@@ -1,21 +1,33 @@
 // src/app/api/admin/tournament/[id]/players/strength/route.ts
 /*
-Purpose: Update a SOLO player’s strength (rating) before the tournament starts.
-Preconditions:
+Purpose:
+Update strength of an already materialized player row (typically SOLO flow before match 1).
 
-* Admin required.
-* Tournament must not be canceled and must not be started (`getTournamentFlags`).
-  Algorithm:
+Algorithm:
 
-1. Parse `{ playerId, strength }`, clamp strength to [1..5].
-2. Verify the player exists and belongs to this tournament (`players` by id + tournament_id).
-3. Update `players.strength` for that player.
-   Outcome: Adjusts player rating used by deterministic bucket assignment and team balancing algorithms prior to team building / start.
-   */
+1. Require authorized tournament manager access.
+2. Reject if:
+   - tournament canceled
+   - tournament finished
+   - teams are already built and current business rules lock strength changes
+   - tournament already moved past the editable pre-start state
+3. Parse JSON body:
+   - playerId
+   - strength
+4. Validate:
+   - player belongs to this tournament
+   - strength is within 1..5
+5. Update `players.strength`.
+6. Return `{ ok:true }`.
+
+Outcome:
+Lets the judge refine the competitive level of a player before final team composition is frozen.
+*/
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdminOr401 } from "@/lib/adminAuth";
+import { requireTournamentManagerOr401 } from "@/lib/adminAccess";
+import { sessionJson, unauthorized } from "@/lib/adminApi";
 import { getTournamentFlags } from "@/lib/tournamentGuards";
 
 function clampInt(v: any, lo: number, hi: number) {
@@ -28,12 +40,12 @@ export async function POST(
   req: Request,
   context: { params: Promise<{ id: string }> }
 ) {
-  if (!(await requireAdminOr401())) {
-    return NextResponse.json({ ok: false, error: "NOT_ADMIN" }, { status: 401 });
-  }
-
   const { id } = await context.params;
   const tournamentId = id;
+  const ctx = await requireTournamentManagerOr401(tournamentId);
+  if (!ctx) {
+    return unauthorized();
+  }
 
   const f = await getTournamentFlags(tournamentId);
   if (f.canceled) {

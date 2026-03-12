@@ -1,268 +1,453 @@
-# Architecture — Lavash (MVP)
+# Lavash — PROJECT_CONTEXT.md
 
-## Overview
-A Next.js App Router project where:
-- Client pages fetch server API routes for mutations
-- API routes use supabaseAdmin (Service Role key) to write to DB
-- Public pages are read-only except application endpoints
+## 1. System Overview
 
-## Data flow
-Public apply flow:
-1) GET tournament page (/t/[id]) shows status + Apply button if allowed.
-2) Public form (/t/[id]/apply) submits POST /api/tournament/[id]/apply.
-3) API validates tournament not canceled and status == draft, inserts into registrations,
-   returns confirmation_code.
-4) UI shows “Код подтверждения”.
+Lavash is a lightweight web platform for managing amateur tennis tournaments.
 
-Public reserve confirm flow:
-1) If a slot in main roster opens up, the oldest reserve registration is moved to `reserve_pending`.
-2) Applicant opens `/t/[id]/reserve-confirm`.
-3) Public form submits POST `/api/tournament/[id]/reserve-confirm`.
-4) API verifies:
-   - confirmation code (case-insensitive),
-   - phone,
-   - last name for SOLO or any one player name for TEAM.
-5) API calls reserve promotion logic:
-   - if slot is still free, registration becomes accepted and is promoted to main roster,
-   - if slot is already occupied, registration remains in reserve.
-6) UI shows success/result message and auto-returns to tournament showcase.
+Tech stack:
 
-Admin flow:
-1) /admin shows tournaments
-2) /admin/t/[id]/registrations:
-   - shows tournament header + registration stats (pending/accepted/total)
-   - can add registration (only if not canceled/finished; ideally only draft)
-   - accepts registrations into main roster or reserve depending on capacity
-   - can confirm reserve promotion manually for `reserve_pending`
-3) /admin/t/[id]/ops:
-   - "Start match" calls POST /api/admin/tournament/[id]/start
-   - entering results calls POST /api/admin/tournament/[id]/game/result
-   - finishing calls POST /api/admin/tournament/[id]/finish
-   - cancel calls POST /api/admin/tournament/[id]/cancel
-   - SOLO: build teams calls POST /api/admin/tournament/[id]/build-teams
-   - SOLO: reset teams calls POST /api/admin/tournament/[id]/reset-teams
+* Next.js (App Router)
+* TypeScript
+* Supabase (Postgres)
+* TailwindCSS
+* Vercel deployment
 
-## Match mechanics
-- Every stage has 4 games (court 1..4)
-- Result endpoint:
-  - sets winner_team_id, score_text, points_awarded
-  - increments winner team points
-  - updates team_state: winner to court-1 (min 1), loser to court+1 (max 4)
-  - DOES NOT auto-create next stage
-- Start endpoint:
-  - guards: previous stage must be complete
-  - determines next stage number: lastStage.number + 1
-  - creates stage
-  - creates games:
-    - stage 1: seededPairs optional + random fill from teams
-    - stage 2+: pairs by team_state.current_court (2 teams per court)
-  - updates tournament.status to live
-  - before first stage starts, all `reserve_pending` registrations are returned back to `reserve`
+Architecture principle:
 
-## Finish mechanics
-- Finish endpoint:
-  - guards: not canceled, not finished
-  - requires last stage complete
-  - marks games of last stage is_final=true (optional for showcase)
-  - sets tournament.status = finished
+Public UI → API Routes → Tournament Logic → Database
 
-## Folder structure (typical)
-src/
-  app/
-    page.tsx                      (public list)
-    t/[id]/page.tsx               (showcase)
-    t/[id]/apply/page.tsx         (public apply form)
-    t/[id]/withdraw/page.tsx      (public withdraw form)
-    t/[id]/reserve-confirm/page.tsx
-    admin/page.tsx                (admin tournaments)
-    admin/t/[id]/registrations/page.tsx
-    admin/t/[id]/ops/page.tsx
-    api/
-      tournaments/route.ts
-      tournament/[id]/apply/route.ts
-      tournament/[id]/mode/route.ts
-      tournament/[id]/public/route.ts
-      tournament/[id]/reserve-confirm/route.ts
-      tournament/[id]/withdraw/route.ts
-      admin/
-        login/route.ts
-        logout/route.ts
-        tournaments/route.ts
-        tournament/[id]/apply/route.ts
-        tournament/[id]/build-teams/route.ts
-        tournament/[id]/reset-teams/route.ts
-        tournament/[id]/cancel/route.ts
-        tournament/[id]/finish/route.ts
-        tournament/[id]/game/result/route.ts
-        tournament/[id]/mode/route.ts
-        tournament/[id]/points-overrides/route.ts
-        tournament/[id]/registrations/route.ts
-        tournament/[id]/registrations/accept/route.ts
-        tournament/[id]/registrations/create/route.ts
-        tournament/[id]/registrations/payment/route.ts
-        tournament/[id]/registrations/strength/route.ts
-        tournament/[id]/solo-players/route.ts
-        tournament/[id]/solo-players/seed/route.ts
-        tournament/[id]/start/route.ts
-        tournament/[id]/state/route.ts
-        tournament/[id]/withdraw/route.ts
+The application has two main surfaces:
 
-  lib/
-    supabaseAdmin.ts              (service role client)
-    supabasePublic.ts
-    payments.ts
-    adminAuth.ts                  (cookie guard requireAdminOr401)
-    requireAdmin.ts
-    tournamentGuards.ts           (getTournamentFlags: canceled/started/finished/status)
-    reserve.ts                    (reserve capacity / promotion logic)
+1. Public tournament pages
+2. Admin panel for judges and administrators
 
-## Key pages
-### /admin (AdminHome)
-- Login by token
-- List tournaments
-- Create tournament (name/date/time/mode + base points c1..c4 + points overrides (dynamic list))
+The system prioritizes:
 
-### /admin/t/[id]/registrations
-- View registrations list
-- Accept / Reject / Unaccept (locked if tournament started)
-- Strength control:
-  - SOLO: per registration strength (player strength)
-  - TEAM: per registration strength (team strength)
-- Payments:
-  - SOLO: single “Взнос” toggle when accepted
-  - TEAM: 3 toggles, one per slot/person, with progress “взнос X/3”
-- Manual add registration (draft only)
-- Reserve-specific behavior:
-  - if accepted count is already full, newly accepted registration goes to reserve
-  - statuses:
-    - `accepted` = in main roster
-    - `reserve` = waiting in reserve
-    - `reserve_pending` = invited to move from reserve to main roster, waiting for confirmation
-  - admin can remove acceptance both from main roster and reserve
-  - admin can manually confirm promotion for `reserve_pending`
-
-### /admin/t/[id]/ops
-- Tournament status + actions:
-  - Build teams (SOLO) (draft only, requires all accepted paid)
-  - Reset teams (SOLO) (draft only; deletes teams/team_members)
-  - Start next match (requires stage complete; first match uses strength-based placement; requires all accepted paid)
-  - Finish tournament (only after current stage complete)
-  - Cancel tournament
-- Points overrides editor (draft only, before match 1)
-- Current match courts:
-  - During start: spinner block
-  - Each GameCard:
-    - pick winner + score
-    - save result with visible “saving…” indicator
-    - saved courts get orange border
-- Teams table (points)
-- Players & seeding management block (SOLO, before match 1):
-  - shows bucket membership and team assignment (after build)
-  - allows setting seed_team_index 1..8 per player (max 8, unique per team) before build
-  - strength and seeding are locked after build until reset
-
-### /t/[id] (public showcase)
-- Shows tournament status and current match
-- Before teams exist / before match 1 in TEAM mode:
-  - shows accepted registrations list instead of team rating
-  - reserve registrations are shown at the bottom, marked “Резерв”
-  - if reserve exists, shows link to reserve confirmation page
-- After teams exist (SOLO) or after first match starts (TEAM):
-  - shows team rating
-- Current match courts:
-  - 2x2 card grid
-  - court points shown as `Очки: +N`
-  - winner / loser movement badges shown like in ops while next stage has not started yet
-
-## Guards
-- `getTournamentFlags(tournamentId)`:
-  - started = status !== draft
-  - canceled = status == canceled
-- Registration ops:
-  - disallow accept/reject/unaccept, manual add, strength edits, payments when tournament started
-- Tournament ops:
-  - build-teams and start require `assertAllAcceptedPaid(tournamentId)`
-  - reset-teams allowed only before start (draft)
-
-## First match seeding and strength-based placement
-- SOLO team strength: sum of 3 players’ strengths from team_members.
-- TEAM team strength: registration.strength via teams.registration_id -> registrations.strength.
-- First match pairing uses strength ordering, with randomization for ties.
+* deterministic tournament mechanics
+* simple judge UX during matches
+* safe public interactions
+* minimal duplicated state
 
 ---
 
-## SOLO: deterministic buckets + one-time randomness
-Bucket membership must be consistent across endpoints (build-teams, solo-players).
+# 2. High-Level Architecture
 
-Deterministic player sort:
-- strength DESC
-- hash(player.id + tournamentId) ASC (FNV-1a 32-bit)
-- id ASC
+Public Browser
+↓
+Next.js Pages (React UI)
+↓
+API Routes
+↓
+Tournament Logic Layer
+↓
+Supabase Database
 
-Bucket slices by position:
-- 1..8   → bucket A (internal bucket=1)
-- 9..16  → bucket B (internal bucket=2)
-- 17..24 → bucket C (internal bucket=3)
+Public pages are read-only except application endpoints.
 
-Team composition randomness:
-- build-teams shuffles pools inside each bucket before distributing to teams
-- this is intended “one-time shuffle” when judge presses Build teams once
+Admin pages mutate data through API routes using the Supabase service role.
 
-## Team naming and numbering (SOLO)
-- In DB, team.name must not include letter prefix.
-- team.name stored as "ФИО1 / ФИО2 / ФИО3".
-- UI uses team_index (1..8) derived from teams ordering by created_at ASC.
-- solo-players endpoint returns team_index and team_slot for each player (if teams exist).
+---
 
-## reset-teams endpoint (SOLO)
-POST /api/admin/tournament/[id]/reset-teams:
-- requires admin
-- guards: not canceled, status == draft, mode == SOLO
-- deletes team_members for tournament teams
-- deletes teams for tournament
-- returns ok
+# 3. Public Area
 
-Purpose:
-- allow judge to rebuild teams after adjusting strength or seeds
+Public pages live under:
 
-## Reserve roster logic
-Capacity:
-- SOLO main roster capacity = 24 accepted registrations
-- TEAM main roster capacity = 8 accepted registrations
+/t/[id]
 
-Acceptance:
-- if judge accepts within capacity → registration.status = `accepted`
-- if judge accepts above capacity → registration.status = `reserve`
-- reserve registrations do not create players/teams/team_members and do not participate in tournament mechanics
+Main page structure:
 
-Automatic invitation from reserve:
-- when one main slot becomes free (SOLO: accepted count becomes 23; TEAM: accepted count becomes 7),
-  the oldest reserve registration by `created_at` is moved to `reserve_pending`
+Section 1 — Tournament header
+Section 2 — Registrations or Team rating
+Section 3 — Current match courts
 
-Promotion confirmation:
-- requires confirmation because applicant plans may change
-- may be confirmed:
-  - publicly via `/t/[id]/reserve-confirm`
-  - by judge in admin registrations page
-- if at confirmation time the main roster is already full, registration returns to `reserve`
+### Tournament states
 
-Visibility:
-- reserve and reserve_pending are not part of built teams / current tournament roster
-- on public showcase before tournament start they are shown only in registrations list, marked as reserve
-- reserve_pending is intentionally not visually distinguished from reserve on showcase
-- after first match starts, reserve remains hidden from the showcase roster UI
+draft
+live
+finished
+canceled
 
-Start boundary:
-- when first match starts, all `reserve_pending` registrations are returned to `reserve`
-- after start, promotion from reserve to main roster is no longer allowed
+Behavior:
 
-## Ops page UI state machine (SOLO)
-Before match 1:
-- if teams not built:
-  - Build teams button enabled (guards apply)
-  - strength and seed controls enabled
-- if teams built:
-  - Build button replaced with Reset teams
-  - strength and seed controls disabled
-During build/reset:
-- show spinner (“бублик”) and disable button
+draft → registrations open
+live → matches visible
+finished → results only
+canceled → read-only
+
+---
+
+# 4. Registration Flow
+
+Public registration:
+
+GET /t/[id]
+
+User opens application form:
+
+POST /api/tournament/[id]/apply
+
+Validation:
+
+* tournament must not be canceled
+* tournament.status == draft
+
+Result:
+
+Registration inserted into `registrations`.
+
+API returns:
+
+confirmation_code
+
+User sees confirmation code for future operations.
+
+---
+
+# 5. Reserve System
+
+Tournament capacity:
+
+SOLO mode = 24 players
+TEAM mode = 8 teams
+
+If capacity exceeded:
+
+registration.status = reserve
+
+States:
+
+pending → accepted → reserve → reserve_pending
+
+reserve_pending means:
+
+Player is invited to join main roster because a slot opened.
+
+Confirmation endpoint:
+
+POST /api/tournament/[id]/reserve-confirm
+
+Promotion rules:
+
+If slot still free → accepted
+If slot already taken → reserve again
+
+After tournament start:
+
+reserve promotion is disabled.
+
+---
+
+# 6. Admin Panel
+
+Admin interface lives under:
+
+/admin
+
+Authentication uses login + password.
+
+Endpoints:
+
+POST /api/admin/login
+POST /api/admin/logout
+GET /api/admin/auth/me
+
+Session:
+
+* httpOnly cookie
+* SameSite=Lax
+* periodic session refresh (60 seconds)
+
+Response of `/api/admin/auth/me`:
+
+{
+user: {
+id,
+first_name,
+last_name,
+login,
+roles[]
+},
+must_change_password,
+password_expired
+}
+
+Redirect rules:
+
+invalid session → /admin
+expired password → /admin/change-password
+
+---
+
+# 7. Role-Based Access (RBAC)
+
+Roles stored in:
+
+admin_users.roles
+
+### ADMIN
+
+Full system access:
+
+* manage users
+* manage auth settings
+* view auth logs
+* manage tournaments
+
+### CHIEF_JUDGE
+
+Tournament management:
+
+* manage registrations
+* build teams
+* start matches
+* finish tournaments
+
+### JUDGE
+
+Operational role:
+
+* enter match results
+* manage courts
+
+Authorization enforced in:
+
+* API routes
+* UI navigation
+
+---
+
+# 8. Admin UI Structure
+
+Each tournament page uses the same layout.
+
+## Section 1 — Tournament header
+
+Contains:
+
+* tournament name
+* date / time
+* mode badge
+* status badge
+* chief judge
+* navigation tabs
+
+Tabs:
+
+Заявки
+Матчи
+Настройки турнира
+
+Global buttons:
+
+← Турниры
+Обновить
+
+Registrations page also displays badges:
+
+* На рассмотрении
+* В основе
+* Резерв
+* Сделаны взносы
+
+---
+
+## Section 2 — Page actions
+
+Registrations page:
+
+(no special actions)
+
+Ops page:
+
+Build teams
+Reset teams
+Start match
+Finish tournament
+Cancel tournament
+
+---
+
+## Section 3 — Main content
+
+Registrations:
+
+registrations table
+
+Ops:
+
+courts grid
+
+---
+
+## Section 4 — Secondary content
+
+Ops page:
+
+team rating table
+
+---
+
+# 9. Modal Forms
+
+Admin UI uses modal forms instead of collapsible blocks.
+
+Example: manual registration creation.
+
+Modal shows:
+
+* form fields
+* confirmation code after creation
+
+Strength hints:
+
+SOLO:
+
+Уровень игрока по умолчанию будет 3
+
+TEAM:
+
+Уровень команды по умолчанию будет 3
+
+---
+
+# 10. Match Mechanics
+
+Each stage contains 4 games.
+
+Courts:
+
+1..4
+
+Game result endpoint:
+
+POST /api/admin/tournament/[id]/game/result
+
+Updates:
+
+winner_team_id
+score_text
+points_awarded
+
+Court movement:
+
+winner → court −1
+loser → court +1
+
+Limits:
+
+court min = 1
+court max = 4
+
+Next stage is not created automatically.
+
+---
+
+# 11. Start Mechanics
+
+Start endpoint:
+
+POST /api/admin/tournament/[id]/start
+
+Rules:
+
+Previous stage must be complete.
+
+Creates:
+
+stage
+games
+
+Stage 1:
+
+random pairing
+
+Stage 2+:
+
+pairing by team_state.current_court
+
+Effect:
+
+tournament.status = live
+
+Before first stage:
+
+reserve_pending → reserve
+
+---
+
+# 12. Finish Mechanics
+
+Finish endpoint:
+
+POST /api/admin/tournament/[id]/finish
+
+Rules:
+
+Last stage must be complete.
+
+Effects:
+
+games.is_final = true
+tournament.status = finished
+
+---
+
+# 13. Guards
+
+Helper:
+
+getTournamentFlags()
+
+Returns:
+
+started
+canceled
+finished
+
+Registration operations disabled when:
+
+started == true
+
+Build teams and start require:
+
+assertAllAcceptedPaid()
+
+---
+
+# 14. Security Model
+
+Authentication:
+
+cookie session
+httpOnly cookie
+SameSite=Lax
+
+Authorization:
+
+role checks in API
+UI hides forbidden actions
+
+Admin routes always use:
+
+supabaseAdmin
+
+Service role key is never exposed to the client.
+
+---
+
+# 15. Key Frontend Components
+
+Core components:
+
+TournamentHeader
+TournamentTabs
+Modal
+Badge
+GameCard
+TeamRatingTable
+
+Admin layout:
+
+AdminLayoutClient
+
+Public pages use centered container layout.

@@ -1,44 +1,40 @@
 // src/app/api/admin/tournament/[id]/build-teams/route.ts
 /*
-Purpose: Build 8 balanced teams (A..H) from 24 SOLO players, with optional manual seeding, before tournament start.
-Preconditions:
+Purpose:
+Build SOLO teams from accepted and fully paid players using deterministic buckets plus one-time randomness.
 
-* Admin required (`requireAdminOr401`).
-* Tournament must be `draft` and not canceled (`getTournamentFlags`).
-* All accepted registrations must be paid (`assertAllAcceptedPaid`).
-* Tournament `registration_mode` must be `SOLO`.
-* Teams must not exist yet (prevents rebuilding without reset).
-  Core algorithm:
+Algorithm:
 
-1. Fetch 24 players for the tournament (`players` table), including `strength` and optional seed fields `seed_team_index` (1..8) and `seed_slot` (1..3). Reject if player count != 24.
-2. Deterministic ranking for bucket assignment:
+1. Require authorized tournament manager access.
+2. Load tournament and reject unless:
+   - mode == SOLO
+   - status == draft
+   - tournament not canceled
+   - tournament not finished
+3. Enforce payment guard:
+   - call `assertAllAcceptedPaid(tournamentId)`
+4. Load accepted SOLO registrations / players.
+5. Require the expected roster size for SOLO main draw (24 players) according to business rules.
+6. Sort players deterministically:
+   - strength DESC
+   - stable hash(player.id + tournamentId)
+   - id ASC
+7. Split sorted players into buckets A/B/C by position.
+8. Apply one-time shuffle inside each bucket.
+9. Respect manual seed assignments where configured.
+10. Create 8 `teams`.
+11. Create `team_members` rows with slots 1..3.
+12. Initialize `team_state` for each team.
+13. Return `{ ok:true, teamsBuilt }`.
 
-   * Normalize strength into [1..5].
-   * Sort by strength desc, then by deterministic FNV-1a hash of `(playerId + tournamentId)` asc, then by `id` as final tie-break.
-     This makes the “top/mid/bottom” segmentation stable across endpoints.
-3. Split sorted list into 3 buckets of 8 players each (bucket1 strongest, bucket2 middle, bucket3 weakest).
-4. Create 8 empty `teams` rows for the tournament.
-5. Apply seeds (manual placements):
-
-   * Take all players with `seed_team_index != null`.
-   * Enforce max 8 seeded players and forbid duplicate `seed_team_index` in the request set.
-   * For each seeded player, assign them into the requested team index (1..8) and into a free slot (preferred `seed_slot` if available, otherwise first free).
-   * Track used players, occupied slots, and “bucket already used by team” to preserve bucket diversity.
-6. Fill remaining slots per team using bucket pools:
-
-   * Build pool1/pool2/pool3 from remaining players per bucket (excluding seeded).
-   * Shuffle within each bucket (bucket membership is deterministic; only intra-bucket order is randomized).
-   * First pass per team: try to take one player from each bucket not yet used by that team.
-   * Second pass: if still not full (because a bucket ran out), fill from any pool, preferring unused buckets first, then any.
-7. Validate output: must assign exactly 24 members (8 teams * 3 slots). Extra safety check: ensure no team has duplicate buckets (should be impossible when buckets are healthy).
-8. Insert `team_members` rows.
-9. Generate team display names by joining member names in slot order (`"P1 / P2 / P3"`) and update `teams.name`.
-   Outcome: Creates balanced SOLO teams with stable bucket logic + optional manual seeding, ready for tournament start.
-   */
+Outcome:
+Creates the playable SOLO team structure used by all later match operations.
+*/
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdminOr401 } from "@/lib/adminAuth";
+import { requireTournamentManagerOr401 } from "@/lib/adminAccess";
+import { sessionJson, unauthorized } from "@/lib/adminApi";
 import { getTournamentFlags } from "@/lib/tournamentGuards";
 import { assertAllAcceptedPaid } from "@/lib/payments";
 
@@ -118,12 +114,12 @@ export async function POST(
     _req: Request,
     context: { params: Promise<{ id: string }> }
 ) {
-    if (!(await requireAdminOr401())) {
-        return NextResponse.json({ ok: false, error: "NOT_ADMIN" }, { status: 401 });
-    }
-
     const { id } = await context.params;
     const tournamentId = id;
+    const ctx = await requireTournamentManagerOr401(tournamentId);
+    if (!ctx) {
+        return unauthorized();
+    }
 
     const f = await getTournamentFlags(tournamentId);
     if (f.canceled) return NextResponse.json({ ok: false, error: "Tournament canceled" }, { status: 400 });

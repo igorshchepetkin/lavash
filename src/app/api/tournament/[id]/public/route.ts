@@ -1,19 +1,38 @@
 // src/app/api/tournament/[id]/public/route.ts
 /*
-Purpose: Public “tournament showcase” endpoint: standings + latest match + UI hint for transitions.
+Purpose:
+Build the full public showcase payload for one tournament.
+
 Algorithm:
 
-1. Load tournament public fields (including points configuration and status).
-2. Load teams ordered by points desc (leaderboard).
-3. Load stages ordered by number desc and pick latestStage.
-4. If latestStage exists, load its games ordered by court (winner, score_text, points_awarded, is_final).
-5. Compute `nextStageExists` as a UI signal:
+1. Read `tournamentId` from params.
+2. Load tournament core metadata:
+   - name
+   - date
+   - start_time
+   - registration_mode
+   - status
+   - chief_judge_name
+   - base points
+3. Load current teams and current/latest stage games.
+4. Load public-facing registrations when relevant.
+5. Build public display state:
+   - before teams exist / before first match in some modes -> show registrations
+   - after teams exist or tournament is already in progress -> show team rating
+6. Ensure reserve registrations are shown only in the intended pre-start scenarios,
+   with reserve rows grouped at the bottom.
+7. Return:
+   - tournament
+   - teams
+   - games
+   - registrations
+   - latestStage
+   - helper flags like `nextStageExists` if used by UI
 
-   * If latestStage number is N, check whether stage N+1 already exists in DB.
-   * This is used to hide/show arrows/transitions on the public board until the next match is actually created.
-6. Return `{ tournament, teams, latestStage, games, nextStageExists }`.
-   Outcome: Read model for the public screen that supports both “current match” display and controlled progression visuals.
-   */
+Outcome:
+Provides the single public tournament page with all data needed for
+header, registrations/rating block, and current match courts.
+*/
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";

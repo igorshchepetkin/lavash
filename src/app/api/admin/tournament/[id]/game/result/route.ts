@@ -1,36 +1,41 @@
 // src/app/api/admin/tournament/[id]/game/result/route.ts
 /*
-Purpose: Submit a game result, award points, and update “court movement” state for the two teams.
-Preconditions:
+Purpose:
+Save the result of one court game in the current stage.
 
-* Admin required.
-* Tournament not canceled and not finished.
-* Game must exist, belong to tournament flow, and not already scored.
-  Algorithm:
+Algorithm:
 
-1. Parse `{ gameId, winnerTeamId, scoreText }`. Validate required fields.
-2. Load tournament base points configuration (`points_c1..points_c4`) and game record (teams, court, stage_id, winner).
-3. Validate `winnerTeamId` is either `team_a_id` or `team_b_id`.
-4. Determine stage number (read from `stages` by `stage_id`).
-5. Resolve points for this court:
+1. Require authorized tournament operator access.
+2. Parse JSON body:
+   - gameId
+   - winnerTeamId
+   - scoreText
+3. Load the target game and validate:
+   - game belongs to this tournament
+   - winnerTeamId is either team_a_id or team_b_id
+   - tournament is not canceled
+   - tournament is not finished
+4. Resolve awarded points:
+   - check stage-specific override for this stage/court
+   - otherwise use base points from tournament
+5. Update `games`:
+   - `winner_team_id`
+   - `score_text`
+   - `points_awarded`
+6. Increment winner team points.
+7. Update `team_state.current_court`:
+   - winner moves up one court (min 1)
+   - loser moves down one court (max 4)
+8. Return `{ ok:true }`.
 
-   * Start with tournament base points by court (1..4).
-   * If stageNumber is known, check `tournament_points_overrides` for that (tournamentId, stageNumber).
-   * If override exists, replace points_c1..c4 from override.
-   * Choose the points value for `g.court`.
-6. Persist game result: set `winner_team_id`, optional `score_text`, and `points_awarded` (no auto “next stage” here).
-7. Increment winner team’s `teams.points` by awarded points.
-8. Update `team_state` movement:
-
-   * Winner moves “up” one court (court-1, clamped to [1..4]).
-   * Loser moves “down” one court (court+1, clamped to [1..4]).
-9. Compute `stageComplete` by checking if every game in this stage has a winner; return it to help UI decide whether “Start next match” can be enabled.
-   Outcome: Atomic-ish update across games, teams, and team_state that drives both scoring and court progression mechanics.
-   */
+Outcome:
+Persists one court result, updates scoring, and repositions teams for the next stage pairing logic.
+*/
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdminOr401 } from "@/lib/adminAuth";
+import { requireTournamentResultWriterOr401 } from "@/lib/adminAccess";
+import { unauthorized } from "@/lib/adminApi";
 import { getTournamentFlags } from "@/lib/tournamentGuards";
 
 function clamp(v: number, lo: number, hi: number) {
@@ -38,12 +43,12 @@ function clamp(v: number, lo: number, hi: number) {
 }
 
 export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
-    if (!(await requireAdminOr401())) {
-        return NextResponse.json({ ok: false, error: "NOT_ADMIN" }, { status: 401 });
-    }
-
     const { id } = await context.params;
     const tournamentId = id;
+    const ctx = await requireTournamentResultWriterOr401(tournamentId);
+    if (!ctx) {
+        return unauthorized();
+    }
 
     const f = await getTournamentFlags(tournamentId);
     if (f.canceled) return NextResponse.json({ ok: false, error: "Tournament canceled" }, { status: 400 });

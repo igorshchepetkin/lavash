@@ -1,48 +1,51 @@
 // src/app/api/admin/tournament/[id]/start/route.ts
 /*
-Purpose: Start a tournament “match stage” (create the next stage and its 4 games) and update team_state courts.
-Preconditions:
+Purpose:
+Start the next tournament match stage by creating a new stage and 4 court games.
 
-* Admin required.
-* Tournament not canceled and not finished.
-* All accepted registrations must be paid (assertAllAcceptedPaid).
-* If a previous stage exists, it must be fully completed (every game has winner_team_id) before starting next.
-  Core mechanics: “4 courts ladder” where winners move up and losers move down between stages.
-  Algorithm:
+Algorithm:
 
-1. Read tournamentId and validate flags; block if canceled/finished.
-2. Load last stage (highest number). If exists:
+1. Require authorized tournament operator:
+   - ADMIN
+   - responsible CHIEF_JUDGE
+   - or allowed JUDGE according to current permissions model
+2. Load tournament and guards:
+   - reject if canceled
+   - reject if finished
+3. Enforce payment guard:
+   - call `assertAllAcceptedPaid(tournamentId)`
+   - reject if any accepted registration is unpaid
+4. Load latest stage and its games.
+5. If a previous stage exists, require all its games to have a winner.
+6. Determine next stage number:
+   - stage 1 if none exists
+   - otherwise latestStage.number + 1
+7. Before starting stage 1:
+   - move all `reserve_pending` registrations back to `reserve`
+8. Create a new `stages` row.
+9. Determine pairings:
+   - stage 1:
+     * use initial tournament pairing logic
+     * for SOLO, this depends on teams built from accepted/paid players
+     * optional seeding and strength ordering may affect the first distribution
+   - stage 2+:
+     * group teams by `team_state.current_court`
+     * create one game per court from the two teams currently assigned there
+10. Resolve points per court:
+    - use `tournament_points_overrides` for this stage if present
+    - otherwise use base `tournaments.points_c1..c4`
+11. Create 4 `games` rows (courts 1..4).
+12. Set `tournament.status='live'` if it was still `draft`.
+13. Return `{ ok:true, stageNumber, createdGames }` or equivalent payload.
 
-   * Load its games; ensure all have winner_team_id. If not complete -> reject (“Previous match is not complete”).
-3. Compute `nextNumber = lastStage.number + 1` (or 1 if no stage yet).
-4. Load exactly 8 teams for the tournament; reject otherwise.
-5. Build games for the next stage:
-   A) If this is NOT the first stage:
-
-   * Load `team_state` rows for tournament (team_id, current_court).
-   * Group teams by court 1..4; require exactly 2 teams per court.
-   * Create 4 games: for each court, pair the 2 teams currently on that court.
-     B) If this IS the first stage:
-   * Compute team “strength” map:
-
-     * TEAM mode: strength comes from linked registration strength (`teams.registration_id -> registrations.strength`).
-     * SOLO mode: sum of players.strength across team_members per team.
-   * Order teams by strength desc, but shuffle within equal-strength groups to avoid deterministic bias.
-   * Pair teams sequentially, placing strongest pair on court 4, next on 3, next on 2, weakest on 1 (initial ladder seeding).
-6. Insert a new `stages` row with `number=nextNumber`.
-7. Insert 4 `games` rows for that stage (court + team_a_id/team_b_id).
-8. Update `team_state` for current courts:
-
-   * If first stage: insert state rows for all 8 teams.
-   * Else: update each team’s `current_court` to the newly scheduled court.
-9. Update tournament status to `"live"`.
-10. Return `{ ok:true, stageNumber: nextNumber }`.
-    Outcome: Creates the next playable match stage and drives the ladder progression using `team_state` across successive stages.
-    */
+Outcome:
+Advances the tournament into the next playable match stage and populates the court grid.
+*/
 
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabaseAdmin";
-import { requireAdminOr401 } from "@/lib/adminAuth";
+import { requireTournamentManagerOr401 } from "@/lib/adminAccess";
+import { sessionJson, unauthorized } from "@/lib/adminApi";
 import { getTournamentFlags } from "@/lib/tournamentGuards";
 import { assertAllAcceptedPaid } from "@/lib/payments";
 
@@ -118,12 +121,12 @@ function orderTeamsByStrength(teamIds: string[], strengthById: Map<string, numbe
 type SeededPair = { court: number; teamA: string; teamB: string };
 
 export async function POST(req: Request, context: { params: Promise<{ id: string }> }) {
-    if (!(await requireAdminOr401())) {
-        return NextResponse.json({ ok: false, error: "NOT_ADMIN" }, { status: 401 });
-    }
-
     const { id } = await context.params;
     const tournamentId = id;
+    const ctx = await requireTournamentManagerOr401(tournamentId);
+    if (!ctx) {
+        return unauthorized();
+    }
 
     const f = await getTournamentFlags(tournamentId);
     if (f.canceled) return NextResponse.json({ ok: false, error: "Tournament canceled" }, { status: 400 });

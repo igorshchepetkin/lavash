@@ -1,16 +1,132 @@
 // src/app/t/[id]/page.tsx
+/*
+Purpose:
+Public tournament showcase page.
+
+Page layout:
+Section 1 — Tournament header
+- tournament name
+- date / time
+- mode badge
+- status badge
+- chief judge
+- button: ← Все турниры
+- optional “Подать заявку” when tournament is open for registration
+
+Section 2 — Registrations or team rating
+- before teams / before match start in the relevant mode:
+  - accepted registrations list
+  - reserve shown at bottom
+- later:
+  - team rating table
+
+Section 3 — Current match
+- court cards
+- teams on each court
+- optional score
+- winner/loser movement hints when relevant
+
+Responsibilities:
+1. Load a public payload from `/api/tournament/[id]/public`.
+2. Display the correct tournament presentation depending on lifecycle:
+   - draft
+   - live
+   - finished
+   - canceled
+3. Show registrations before competitive team view is available.
+4. Show team standings once tournament mechanics have meaningfully started.
+5. Hide or reduce sensitive/internal details not intended for public audience.
+
+Reserve presentation:
+- reserve rows grouped below accepted list
+- reserve confirmation link shown only when relevant
+
+Design intent:
+This page is the public “front door” of a tournament and should be readable,
+clean, and visually consistent with the admin-side card language.
+
+Outcome:
+Provides the single public-facing state summary of a tournament for players and spectators.
+*/
+
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams } from "next/navigation";
 
 type Payload = any;
 
-function statusText(s: string) {
-  if (s === "draft") return "Приём заявок";
-  if (s === "live") return "Идёт";
-  if (s === "finished") return "Завершён";
-  return "Отменён";
+function statusBadge(status: string) {
+  switch (status) {
+    case "draft":
+      return {
+        text: "Приём заявок",
+        style: {
+          backgroundColor: "#FFEDD5",
+          color: "#C2410C",
+          borderColor: "#FED7AA",
+        },
+      };
+    case "live":
+      return {
+        text: "Идёт",
+        style: {
+          backgroundColor: "#E0F2FE",
+          color: "#0369A1",
+          borderColor: "#BAE6FD",
+        },
+      };
+    case "finished":
+      return {
+        text: "Завершён",
+        style: {
+          backgroundColor: "#D1FAE5",
+          color: "#047857",
+          borderColor: "#A7F3D0",
+        },
+      };
+    case "canceled":
+      return {
+        text: "Отменён",
+        style: {
+          backgroundColor: "#E2E8F0",
+          color: "#475569",
+          borderColor: "#CBD5E1",
+        },
+      };
+    default:
+      return {
+        text: status,
+        style: {
+          backgroundColor: "#F1F5F9",
+          color: "#475569",
+          borderColor: "#E2E8F0",
+        },
+      };
+  }
+}
+
+function modeBadge(mode: "TEAM" | "SOLO") {
+  if (mode === "SOLO") {
+    return {
+      text: "SOLO",
+      style: {
+        backgroundColor: "#F5F3FF",
+        color: "#6D28D9",
+        borderColor: "#DDD6FE",
+      },
+    };
+  }
+
+  return {
+    text: "TEAM",
+    style: {
+      backgroundColor: "#FFF7ED",
+      color: "#C2410C",
+      borderColor: "#FED7AA",
+    },
+  };
 }
 
 function Tag({
@@ -20,17 +136,23 @@ function Tag({
   kind: "accepted" | "reserve";
   text: string;
 }) {
-  const cls =
+  const style =
     kind === "accepted"
-      ? "bg-orange-50 text-orange-700 border-orange-200"
-      : "bg-slate-50 text-slate-600 border-slate-200";
+      ? {
+        backgroundColor: "#FFF7ED",
+        color: "#C2410C",
+        borderColor: "#FED7AA",
+      }
+      : {
+        backgroundColor: "#F8FAFC",
+        color: "#475569",
+        borderColor: "#E2E8F0",
+      };
 
   return (
     <span
-      className={
-        "inline-flex w-[78px] justify-center items-center rounded-full border px-2.5 py-1 text-[12px] font-extrabold " +
-        cls
-      }
+      className="inline-flex w-[78px] items-center justify-center rounded-full border px-2.5 py-1 text-[12px] font-extrabold"
+      style={style}
     >
       {text}
     </span>
@@ -62,10 +184,7 @@ export default function TournamentShowcase() {
   const t = p?.tournament;
   const teams = p?.teams ?? [];
   const games = p?.games ?? [];
-  const nameById = useMemo(
-    () => new Map(teams.map((x: any) => [x.id, x.name])),
-    [teams]
-  );
+  const nameById = useMemo(() => new Map(teams.map((x: any) => [x.id, x.name])), [teams]);
 
   function teamName(teamId: any): string {
     const v = nameById.get(teamId);
@@ -76,10 +195,6 @@ export default function TournamentShowcase() {
 
   const regsRaw = p?.registrations ?? [];
 
-  // Sort for public showcase:
-  // 1) main (not reserve) first
-  // 2) reserve at bottom
-  // 3) inside each bucket: by created_at asc (as before)
   const regs = useMemo(() => {
     const main = regsRaw
       .filter((r: any) => !r.is_reserve)
@@ -92,20 +207,15 @@ export default function TournamentShowcase() {
 
   const hasReserve = regs.some((r: any) => !!r.is_reserve);
 
-  // When to show team rating section:
-  // - SOLO: show rating only if teams already built
-  // - TEAM: show rating only after tournament is live (first match started)
   const showTeamRating =
     t?.registration_mode === "TEAM" ? t?.status !== "draft" : teams.length > 0;
 
   if (err) {
     return (
-      <main className="min-h-screen bg-white">
-        <div className="mx-auto max-w-5xl px-4 py-10">
-          <div className="rounded-2xl border border-red-200 bg-red-50 p-4 text-sm font-semibold text-red-700">
-            {err}
-          </div>
-        </div>
+      <main className="space-y-6">
+        <section className="rounded-3xl border border-red-200 bg-red-50 p-6 shadow-sm">
+          <div className="text-sm font-semibold text-red-700">{err}</div>
+        </section>
       </main>
     );
   }
@@ -113,14 +223,15 @@ export default function TournamentShowcase() {
   if (!t) {
     return (
       <main className="min-h-screen bg-white">
-        <div className="mx-auto max-w-5xl px-4 py-10 text-sm text-slate-600">
-          Загрузка…
+        <div className="mx-auto max-w-5xl space-y-6 px-4 py-8">
+          <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+            Загрузка...
+          </section>
         </div>
       </main>
     );
   }
 
-  const dt = `${t.date}${t.start_time ? ` · ${t.start_time}` : ""}`;
   const canApply = t.status === "draft";
   const canceled = t.status === "canceled";
 
@@ -163,60 +274,93 @@ export default function TournamentShowcase() {
   }
 
   function rowBg(winnerId: string | null, teamId: string) {
-    // если победителя ещё нет — нейтрально
     if (!winnerId) return "bg-slate-50";
-    // иначе: победитель зелёный, проигравший красный
     return winnerId === teamId ? "bg-emerald-50" : "bg-red-50";
   }
 
+  const st = statusBadge(t.status);
+  const md = modeBadge(t.registration_mode);
+
   return (
     <main className="min-h-screen bg-white">
-      <div className="mx-auto max-w-5xl px-4 py-8">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-extrabold tracking-tight">{t.name}</h1>
-            <div className="mt-1 text-sm text-slate-600">
-              {dt} · <b className="text-orange-600">{t.registration_mode}</b> ·{" "}
-              <b className={canceled ? "text-red-700" : "text-orange-600"}>
-                {statusText(t.status)}
-              </b>
+      <div className="mx-auto max-w-5xl space-y-6 px-4 py-8">
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+          <div
+            className="grid gap-4"
+            style={{
+              gridTemplateColumns: "minmax(0, 1fr) auto",
+              alignItems: "start",
+            }}
+          >
+            <div className="min-w-0">
+              <h1 className="text-2xl font-extrabold text-slate-900">{t.name}</h1>
+
+              <div className="mt-4 rounded-2xl border border-slate-200 px-4 py-3">
+                <div className="flex flex-wrap items-center gap-3 text-sm text-slate-600">
+                  <span>
+                    {t.date}
+                    {t.start_time ? ` · ${t.start_time}` : ""}
+                  </span>
+
+                  <span
+                    className="inline-flex rounded-full border px-2 py-1 text-xs font-bold"
+                    style={md.style}
+                  >
+                    {md.text}
+                  </span>
+
+                  <span
+                    className="inline-flex rounded-full border px-2 py-1 text-xs font-bold"
+                    style={st.style}
+                  >
+                    {st.text}
+                  </span>
+                </div>
+
+                <div className="mt-2 text-sm text-slate-700">
+                  Главный судья:{" "}
+                  <span className="font-semibold text-slate-900">
+                    {t.chief_judge_name || "—"}
+                  </span>
+                </div>
+              </div>
             </div>
-          </div>
 
-          <div className="flex gap-2">
-            <a
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50"
-              href="/"
-            >
-              ← Все турниры
-            </a>
-
-            {canApply && (
-              <a
-                className="rounded-xl bg-orange-600 px-4 py-2 text-sm font-bold text-white hover:bg-orange-700"
-                href={`/t/${id}/apply`}
+            <div className="flex flex-wrap gap-2 justify-end">
+              <Link
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold hover:bg-slate-50"
+                href="/"
               >
-                Подать заявку
-              </a>
-            )}
-          </div>
-        </div>
+                ← Все турниры
+              </Link>
 
-        {canceled && (
-          <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 p-5">
-            <div className="text-lg font-extrabold text-red-800">Турнир отменён</div>
-            <div className="mt-2 text-sm text-red-700">
-              Подача заявок и любые операции по турниру недоступны. Все заявки считаются
-              отменёнными.
+              {canApply && (
+                <Link
+                  className="rounded-xl bg-orange-600 px-4 py-2 text-sm font-bold text-white hover:bg-orange-700"
+                  href={`/t/${id}/apply`}
+                >
+                  Подать заявку
+                </Link>
+              )}
             </div>
           </div>
-        )}
 
-        <section className="mt-6 rounded-2xl border border-slate-200 p-5">
+          {canceled && (
+            <div className="mt-5 rounded-2xl border border-red-200 bg-red-50 p-5">
+              <div className="text-lg font-extrabold text-red-800">Турнир отменён</div>
+              <div className="mt-2 text-sm text-red-700">
+                Подача заявок и любые операции по турниру недоступны. Все заявки считаются отменёнными.
+              </div>
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           {showTeamRating ? (
             <>
               <h2 className="text-lg font-bold">Рейтинг команд</h2>
-              <div className="mt-3 grid gap-2">
+
+              <div className="mt-4 grid gap-2">
                 {teams.map((tm: any, idx: number) => (
                   <div
                     key={tm.id}
@@ -229,6 +373,7 @@ export default function TournamentShowcase() {
                     <div className="text-sm font-bold">{tm.points}</div>
                   </div>
                 ))}
+
                 {teams.length === 0 && (
                   <div className="text-sm text-slate-600">
                     Пока нет команд (или они ещё не сформированы).
@@ -240,7 +385,7 @@ export default function TournamentShowcase() {
             <>
               <h2 className="text-lg font-bold">Заявки</h2>
 
-              <div className="mt-3 overflow-hidden rounded-xl border border-slate-100">
+              <div className="mt-4 overflow-hidden rounded-xl border border-slate-100">
                 {regs.length === 0 ? (
                   <div className="px-3 py-3 text-sm text-slate-600">Пока нет принятых заявок.</div>
                 ) : (
@@ -289,19 +434,19 @@ export default function TournamentShowcase() {
               {hasReserve && (
                 <div className="mt-3 text-sm text-slate-600">
                   Если Вы получили уведомление о переходе из резерва в основу,{" "}
-                  <a
+                  <Link
                     className="font-semibold text-orange-700 hover:underline"
                     href={`/t/${id}/reserve-confirm`}
                   >
                     подтвердите переход здесь →
-                  </a>
+                  </Link>
                 </div>
               )}
             </>
           )}
         </section>
 
-        <section className="mt-6 rounded-2xl border border-slate-200 p-5">
+        <section className="rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-bold">Текущий матч</h2>
             <div className="text-sm text-slate-600">
@@ -309,7 +454,6 @@ export default function TournamentShowcase() {
             </div>
           </div>
 
-          {/* 2x2 grid like ops (on >=sm) */}
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {games.map((g: any) => {
               const winnerId = (g.winner_team_id ?? null) as string | null;
